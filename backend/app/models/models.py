@@ -1,6 +1,7 @@
 """
-Database models — all tables are append-only by design.
-audit_logs has no UPDATE/DELETE permissions enforced at the service layer.
+Database models — MySQL-first, SQLite-compatible for tests.
+All tables use utf8mb4 charset on MySQL.
+audit_logs is append-only (enforced at service layer).
 """
 import uuid
 from datetime import datetime
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Boolean, Column, DateTime, Enum, Float,
     ForeignKey, Index, String, Text, UniqueConstraint,
 )
+from sqlalchemy.dialects.mysql import MEDIUMTEXT as _MYSQL_MEDIUMTEXT
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
@@ -16,6 +18,18 @@ from app.models.base import Base
 
 def _uuid():
     return str(uuid.uuid4())
+
+
+def _text_col(**kwargs):
+    """
+    Returns MEDIUMTEXT on MySQL, plain Text on every other dialect (SQLite for tests).
+    SQLAlchemy picks the right type at DDL time based on the bound engine.
+    """
+    return Column(Text().with_variant(_MYSQL_MEDIUMTEXT(), "mysql"), **kwargs)
+
+
+# Shared MySQL table options
+_MYSQL_OPTS = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
 
 
 # ─────────────────────────────────────────────
@@ -36,6 +50,8 @@ class User(Base):
         "Transaction", foreign_keys="Transaction.sender_id", back_populates="sender"
     )
 
+    __table_args__ = (_MYSQL_OPTS,)
+
 
 # ─────────────────────────────────────────────
 # keys  — encrypted private key, plain public key
@@ -45,10 +61,8 @@ class KeyPair(Base):
 
     id = Column(String(36), primary_key=True, default=_uuid)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    # PEM-encoded public key (safe to store plaintext)
-    public_key_pem = Column(Text, nullable=False)
-    # AES-GCM encrypted private key (base64-encoded ciphertext + nonce + tag)
-    encrypted_private_key = Column(Text, nullable=False)
+    public_key_pem = _text_col(nullable=False)
+    encrypted_private_key = _text_col(nullable=False)
     algorithm = Column(String(16), default="ECDSA-P256")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -56,7 +70,10 @@ class KeyPair(Base):
 
     user = relationship("User", back_populates="keys")
 
-    __table_args__ = (Index("ix_keys_user_active", "user_id", "is_active"),)
+    __table_args__ = (
+        Index("ix_keys_user_active", "user_id", "is_active"),
+        _MYSQL_OPTS,
+    )
 
 
 # ─────────────────────────────────────────────
@@ -67,25 +84,29 @@ class Transaction(Base):
 
     id = Column(String(36), primary_key=True, default=_uuid)
     sender_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    receiver_id = Column(String(36), nullable=False)   # external or internal user id
+    receiver_id = Column(String(128), nullable=False)
     amount = Column(Float, nullable=False)
     currency = Column(String(8), default="USD")
     nonce = Column(String(64), unique=True, nullable=False, index=True)
-    timestamp = Column(DateTime, nullable=False)        # client-supplied, validated
-    payload_hash = Column(String(64), nullable=False)   # SHA-256 of canonical payload
-    signature = Column(Text, nullable=False)            # base64 DER signature
+    timestamp = Column(DateTime, nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    signature = _text_col(nullable=False)
     key_id = Column(String(36), ForeignKey("keys.id"), nullable=False)
     status = Column(
-        Enum("pending", "verified", "rejected", "tampered", name="tx_status"),
+        Enum("pending", "verified", "rejected", "tampered"),
         default="pending",
+        nullable=False,
     )
-    metadata_json = Column(Text, nullable=True)         # optional extra fields (JSON)
+    metadata_json = _text_col(nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     sender = relationship("User", foreign_keys=[sender_id], back_populates="transactions_sent")
     key = relationship("KeyPair")
 
-    __table_args__ = (Index("ix_tx_sender_ts", "sender_id", "timestamp"),)
+    __table_args__ = (
+        Index("ix_tx_sender_ts", "sender_id", "timestamp"),
+        _MYSQL_OPTS,
+    )
 
 
 # ─────────────────────────────────────────────
@@ -98,9 +119,12 @@ class Nonce(Base):
     nonce = Column(String(64), unique=True, nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
     used_at = Column(DateTime, default=datetime.utcnow)
-    expires_at = Column(DateTime, nullable=False)       # used_at + 5 min window
+    expires_at = Column(DateTime, nullable=False)
 
-    __table_args__ = (UniqueConstraint("nonce", name="uq_nonce"),)
+    __table_args__ = (
+        UniqueConstraint("nonce", name="uq_nonce"),
+        _MYSQL_OPTS,
+    )
 
 
 # ─────────────────────────────────────────────
@@ -110,12 +134,15 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(String(36), primary_key=True, default=_uuid)
-    event_type = Column(String(64), nullable=False)     # e.g. KEY_GENERATED, TX_SIGNED
-    actor_id = Column(String(36), nullable=True)        # user who triggered event
-    transaction_id = Column(String(36), nullable=True)  # linked transaction if any
-    detail = Column(Text, nullable=True)                # JSON detail blob
+    event_type = Column(String(64), nullable=False)
+    actor_id = Column(String(36), nullable=True)
+    transaction_id = Column(String(36), nullable=True)
+    detail = _text_col(nullable=True)
     ip_address = Column(String(45), nullable=True)
     success = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
-    __table_args__ = (Index("ix_audit_actor_ts", "actor_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_audit_actor_ts", "actor_id", "created_at"),
+        _MYSQL_OPTS,
+    )

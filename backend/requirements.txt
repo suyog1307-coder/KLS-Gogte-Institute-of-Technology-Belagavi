@@ -12,3 +12,6 @@ python-multipart==0.0.9
 httpx==0.27.0
 pytest==8.2.0
 pytest-asyncio==0.23.6
+# MySQL driver — PyMySQL (pure Python, no C deps needed)
+pymysql==1.1.1
+cryptography==42.0.7

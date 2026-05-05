@@ -1,27 +1,32 @@
 """
-Test configuration — uses a shared in-memory SQLite database.
-
-Key: StaticPool ensures all connections share the same in-memory DB instance,
-so create_all and the test sessions see the same tables and data.
+Test configuration — uses in-memory SQLite (no MySQL required for tests).
+We patch the engine BEFORE any app module imports it, so tests never
+touch MySQL.
 """
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from fastapi.testclient import TestClient
 
-# Import all models so Base.metadata is fully populated
-from app.models import models  # noqa: F401
-from app.models.base import Base, get_db
-
+# ── 1. Build the test engine FIRST, before importing anything from app ────────
 test_engine = create_engine(
     "sqlite:///:memory:",
     connect_args={"check_same_thread": False},
-    poolclass=StaticPool,  # ← all connections share the same in-memory DB
+    poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
-# Create all tables once
+# ── 2. Patch app.models.base BEFORE the app imports it ───────────────────────
+import app.models.base as _models_base  # noqa: E402
+_models_base.engine = test_engine
+_models_base.SessionLocal = TestingSessionLocal
+
+# ── 3. Now import models + Base (safe — engine is already patched) ────────────
+from app.models import models  # noqa: F401, E402
+from app.models.base import Base, get_db  # noqa: E402
+
+# ── 4. Create all tables on the in-memory engine ──────────────────────────────
 Base.metadata.create_all(bind=test_engine)
 
 
@@ -44,7 +49,6 @@ def client():
 
 @pytest.fixture()
 def auth_headers(client):
-    """Register + login a fresh test user, return auth headers."""
     import uuid
     uname = f"hdr_{uuid.uuid4().hex[:8]}"
     r1 = client.post("/api/v1/auth/register", json={
@@ -58,5 +62,4 @@ def auth_headers(client):
         "password": "securepass123",
     })
     assert resp.status_code == 200, f"Login failed: {resp.text}"
-    token = resp.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}

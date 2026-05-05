@@ -8,15 +8,28 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
 
-    # Database — default to SQLite for demo; swap to postgres:// for prod
-    DATABASE_URL: str = "sqlite:///./txsign.db"
+    # ── MySQL connection ──────────────────────────────────────────────────────
+    # Format: mysql+pymysql://user:password@host:port/dbname?charset=utf8mb4
+    MYSQL_USER: str = "txsign_user"
+    MYSQL_PASSWORD: str = "txsign_pass"
+    MYSQL_HOST: str = "localhost"
+    MYSQL_PORT: int = 3306
+    MYSQL_DB: str = "txsign_db"
+
+    @property
+    def DATABASE_URL(self) -> str:
+        return (
+            f"mysql+pymysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}"
+            f"@{self.MYSQL_HOST}:{self.MYSQL_PORT}/{self.MYSQL_DB}"
+            f"?charset=utf8mb4"
+        )
 
     # Security
     SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION_USE_32_BYTES_MIN"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
-    # Key encryption passphrase (used to AES-GCM encrypt private keys at rest)
+    # Key encryption passphrase (AES-256-GCM encrypts private keys at rest)
     KEY_ENCRYPTION_SECRET: str = "CHANGE_ME_KEY_ENCRYPTION_SECRET_32B"
 
     # Replay attack window in seconds (5 minutes)
