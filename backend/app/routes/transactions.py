@@ -73,7 +73,7 @@ async def sign_transaction(
     key_svc.check_key_valid(key_id, current_user.id)   # raises 410 if expired
 
     # ── Face verification gate ────────────────────────────────────────────────
-    if settings.FACE_REQUIRED_FOR_SIGNING:
+    if settings.FACE_REQUIRED_FOR_SIGNING and settings.FACE_ENABLED:
         if face_image is None:
             raise HTTPException(
                 status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: txsign-backend
+    runtime: python
+    buildCommand: pip install -r requirements-deploy.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHONPATH
+        value: app
+      - key: DATABASE_URL
+        sync: false   # set in Render dashboard
+      - key: SECRET_KEY
+        sync: false
+      - key: KEY_ENCRYPTION_SECRET
+        sync: false
+      - key: FACE_ENABLED
+        value: "false"
+      - key: FACE_REQUIRED_FOR_SIGNING
+        value: "false"
+      - key: DEBUG
+        value: "false"
+      - key: TF_CPP_MIN_LOG_LEVEL
+        value: "3"

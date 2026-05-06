@@ -37,9 +37,16 @@ class Settings(BaseSettings):
     FACE_REQUIRED_FOR_SIGNING: bool = True      # enforce face check on sign
     FACE_REQUIRED_FOR_LOGIN: bool = False       # optional on login
     FACE_ENFORCE_DETECTION: bool = False        # False = try all backends incl. skip
+    # Set False on free hosting — DeepFace/TensorFlow needs 2GB+ RAM
+    FACE_ENABLED: bool = True
 
-    # CORS
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    # ── CORS ──────────────────────────────────────────────────────────────────
+    # Add your Netlify URL here after deploying frontend
+    ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://*.netlify.app",
+    ]
 
     class Config:
         env_file = ".env"

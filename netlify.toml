@@ -1,0 +1,20 @@
+[build]
+  base    = "frontend"
+  command = "npm run build"
+  publish = "frontend/dist"
+
+[build.environment]
+  NODE_VERSION = "18"
+
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
+
+# Proxy API calls to Render backend
+# Replace with your actual Render URL after deploying backend
+[[redirects]]
+  from   = "/api/*"
+  to     = "https://YOUR_RENDER_URL.onrender.com/api/:splat"
+  status = 200
+  force  = true
