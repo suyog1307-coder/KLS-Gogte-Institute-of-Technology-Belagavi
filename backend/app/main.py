@@ -13,6 +13,7 @@ from app.core.config import settings
 import app.models.base as models_base
 from app.models.base import Base
 from app.routes import auth, audit, fraud, keys, transactions
+from app.routes import face as face_router
 
 
 @asynccontextmanager
@@ -49,6 +50,7 @@ app.include_router(keys.router, prefix=prefix)
 app.include_router(transactions.router, prefix=prefix)
 app.include_router(audit.router, prefix=prefix)
 app.include_router(fraud.router, prefix=prefix)
+app.include_router(face_router.router, prefix=prefix)
 
 
 # ── Health Check ──────────────────────────────────────────────────────────────

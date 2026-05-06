@@ -47,12 +47,14 @@ class UserOut(BaseModel):
 # ── Keys ──────────────────────────────────────────────────────────────────────
 
 class KeyPairOut(BaseModel):
-    key_id: str
-    public_key_pem: str
-    algorithm: str
-    created_at: datetime
-    # Private key is returned ONCE at generation time, never stored in plaintext
-    private_key_pem: Optional[str] = None
+    key_id:            str
+    public_key_pem:    str
+    algorithm:         str
+    created_at:        datetime
+    expires_at:        Optional[datetime] = None
+    seconds_remaining: Optional[int] = None
+    # Private key returned ONCE at generation, never again
+    private_key_pem:   Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -108,21 +110,30 @@ class TransactionVerifyPayload(BaseModel):
 
 
 class TransactionOut(BaseModel):
-    id: str
-    sender_id: str
-    receiver_id: str
-    amount: float
-    currency: str
-    nonce: str
-    timestamp: datetime
+    id:           str
+    sender_id:    str
+    sender_username: Optional[str] = None
+    receiver_id:  str
+    amount:       float
+    currency:     str
+    nonce:        str
+    timestamp:    datetime
     payload_hash: str
-    signature: str
-    key_id: str
-    status: str
-    created_at: datetime
+    signature:    str
+    key_id:       str
+    status:       str
+    created_at:   datetime
 
     class Config:
         from_attributes = True
+
+
+class BalanceSummary(BaseModel):
+    sent_count:  int
+    sent_total:  float
+    recv_count:  int
+    recv_total:  float
+    net_balance: float
 
 
 class VerificationResult(BaseModel):

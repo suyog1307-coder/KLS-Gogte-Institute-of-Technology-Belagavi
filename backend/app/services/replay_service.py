@@ -41,7 +41,10 @@ class ReplayProtectionService:
         # 2. Nonce uniqueness check
         existing = self.db.query(Nonce).filter(Nonce.nonce == nonce).first()
         if existing:
-            return False, f"Nonce '{nonce}' has already been used (replay attack detected)"
+            return False, (
+                "This transaction has already been submitted (duplicate nonce). "
+                "A new nonce has been generated — please try again."
+            )
 
         # 3. Consume the nonce
         record = Nonce(

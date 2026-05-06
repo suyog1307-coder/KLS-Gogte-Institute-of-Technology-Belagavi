@@ -1,15 +1,14 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-
 from app.core.config import settings
+
+# SQLite needs check_same_thread=False; other DBs don't need it
+connect_args = {"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
 
 engine = create_engine(
     settings.DATABASE_URL,
-    # MySQL connection pool settings
-    pool_pre_ping=True,       # reconnect on stale connections
-    pool_recycle=3600,        # recycle connections every hour
-    pool_size=10,
-    max_overflow=20,
+    connect_args=connect_args,
+    pool_pre_ping=True,
     echo=settings.DEBUG,
 )
 

@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
-import { ShieldCheck, ShieldX, Hash, Key, RefreshCw } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { ShieldCheck, ShieldX, Hash, Key, RefreshCw, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useSearchParams } from 'react-router-dom'
 import { txApi } from '../services/api'
 
 interface VerificationResult {
@@ -26,17 +27,26 @@ function CheckRow({ label, value }: { label: string; value: boolean }) {
 }
 
 export default function VerifyTransactionPage() {
-  const [txId, setTxId] = useState('')
+  const [searchParams] = useSearchParams()
+  const [txId, setTxId]     = useState(searchParams.get('id') || '')
   const [result, setResult] = useState<VerificationResult | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const handleVerify = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!txId.trim()) return
+  // Auto-verify if ID came from URL
+  useEffect(() => {
+    const idFromUrl = searchParams.get('id')
+    if (idFromUrl) {
+      setTxId(idFromUrl)
+      runVerify(idFromUrl)
+    }
+  }, [])
+
+  const runVerify = async (id: string) => {
+    if (!id.trim()) return
     setLoading(true)
     setResult(null)
     try {
-      const { data } = await txApi.verify(txId.trim())
+      const { data } = await txApi.verify(id.trim())
       setResult(data)
       if (data.valid) {
         toast.success('Transaction verified successfully!')
@@ -48,6 +58,11 @@ export default function VerifyTransactionPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleVerify = (e: React.FormEvent) => {
+    e.preventDefault()
+    runVerify(txId)
   }
 
   return (
@@ -62,30 +77,45 @@ export default function VerifyTransactionPage() {
         </p>
       </div>
 
+      {/* Input */}
       <div className="card">
-        <form onSubmit={handleVerify} className="flex gap-3">
-          <input
-            className="input flex-1"
-            value={txId}
-            onChange={(e) => setTxId(e.target.value)}
-            placeholder="Enter Transaction ID..."
-          />
-          <button type="submit" className="btn-primary flex items-center gap-2" disabled={loading}>
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            {loading ? 'Verifying...' : 'Verify'}
-          </button>
+        <form onSubmit={handleVerify} className="space-y-3">
+          <div>
+            <label className="label">Transaction ID</label>
+            <div className="flex gap-2">
+              <input
+                className="input flex-1 font-mono text-sm"
+                value={txId}
+                onChange={(e) => setTxId(e.target.value)}
+                placeholder="e8d9d9a2-c927-4060-9a67-2baf77de7990"
+              />
+              <button
+                type="submit"
+                className="btn-primary flex items-center gap-2 shrink-0"
+                disabled={loading || !txId.trim()}
+              >
+                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+                {loading ? 'Verifying...' : 'Verify'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Paste the full Transaction ID (e.g. e8d9d9a2-c927-4060-9a67-2baf77de7990)
+            </p>
+          </div>
         </form>
       </div>
 
+      {/* Result */}
       {result && (
-        <div className={`card ${result.valid ? 'border-green-800 bg-green-900/10' : 'border-red-800 bg-red-900/10'}`}>
+        <div className={`card ${result.valid
+          ? 'border-green-800 bg-green-900/10'
+          : 'border-red-800 bg-red-900/10'}`}>
+
           {/* Header */}
           <div className="flex items-center gap-3 mb-4">
-            {result.valid ? (
-              <ShieldCheck className="text-green-400" size={28} />
-            ) : (
-              <ShieldX className="text-red-400" size={28} />
-            )}
+            {result.valid
+              ? <ShieldCheck className="text-green-400" size={28} />
+              : <ShieldX className="text-red-400" size={28} />}
             <div>
               <h3 className={`font-bold text-lg ${result.valid ? 'text-green-300' : 'text-red-300'}`}>
                 {result.valid ? 'VALID TRANSACTION' : 'INVALID TRANSACTION'}
@@ -94,23 +124,39 @@ export default function VerifyTransactionPage() {
             </div>
           </div>
 
-          {/* Checks */}
+          {/* 3 checks */}
           <div className="bg-gray-900 rounded-lg p-4 mb-4">
             <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
               Verification Checks
             </h4>
             <CheckRow label="Payload Hash Integrity" value={result.hash_match} />
-            <CheckRow label="ECDSA Signature Valid" value={result.signature_valid} />
-            <CheckRow label="Replay Attack Safe" value={result.replay_safe} />
+            <CheckRow label="ECDSA Signature Valid"  value={result.signature_valid} />
+            <CheckRow label="Replay Attack Safe"     value={result.replay_safe} />
           </div>
 
           {/* Details */}
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-400">Transaction ID</span>
-              <code className="text-gray-300 text-xs">{result.transaction_id}</code>
+          <div className="space-y-3 text-sm">
+            {/* Full transaction ID with copy */}
+            <div>
+              <p className="text-gray-400 text-xs mb-1">Transaction ID</p>
+              <div className="flex items-center gap-2 bg-gray-900 rounded-lg px-3 py-2">
+                <code className="text-gray-200 text-xs font-mono flex-1 break-all select-all">
+                  {result.transaction_id}
+                </code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(result.transaction_id)
+                    toast.success('Copied!')
+                  }}
+                  className="text-gray-500 hover:text-blue-400 transition-colors shrink-0"
+                  title="Copy"
+                >
+                  <Copy size={13} />
+                </button>
+              </div>
             </div>
-            <div className="flex justify-between">
+
+            <div className="flex justify-between items-center">
               <span className="text-gray-400">Status</span>
               <span className={
                 result.status === 'verified' ? 'badge-green' :
@@ -119,7 +165,7 @@ export default function VerifyTransactionPage() {
                 {result.status.toUpperCase()}
               </span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between items-center">
               <span className="text-gray-400">Checked At</span>
               <span className="text-gray-300 text-xs">
                 {new Date(result.checked_at).toLocaleString()}
@@ -129,7 +175,7 @@ export default function VerifyTransactionPage() {
         </div>
       )}
 
-      {/* Explanation */}
+      {/* How it works */}
       <div className="card">
         <h3 className="font-semibold text-white mb-3">How Verification Works</h3>
         <div className="space-y-3 text-sm text-gray-400">
@@ -151,7 +197,7 @@ export default function VerifyTransactionPage() {
             <ShieldCheck size={16} className="text-blue-400 mt-0.5 shrink-0" />
             <div>
               <span className="text-white font-medium">Replay Check</span> — Confirms the nonce was
-              consumed within the 5-minute window and has not been reused.
+              consumed and has not been reused.
             </div>
           </div>
         </div>

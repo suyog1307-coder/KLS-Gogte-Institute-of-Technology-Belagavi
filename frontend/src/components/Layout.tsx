@@ -2,15 +2,16 @@ import React from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
-  KeyRound, Send, ShieldCheck, List, ScrollText, LogOut, Lock
+  KeyRound, Send, ShieldCheck, List, ScrollText, LogOut, Lock, ScanFace
 } from 'lucide-react'
 
 const navItems = [
-  { to: '/transactions', icon: List, label: 'Transactions' },
-  { to: '/sign', icon: Send, label: 'Sign Transaction' },
-  { to: '/verify', icon: ShieldCheck, label: 'Verify' },
-  { to: '/keys', icon: KeyRound, label: 'Key Management' },
-  { to: '/audit', icon: ScrollText, label: 'Audit Logs' },
+  { to: '/transactions', icon: List,       label: 'Transactions' },
+  { to: '/sign',         icon: Send,       label: 'Sign Transaction' },
+  { to: '/verify',       icon: ShieldCheck, label: 'Verify' },
+  { to: '/face',         icon: ScanFace,   label: 'Face Enrollment' },
+  { to: '/keys',         icon: KeyRound,   label: 'Key Management' },
+  { to: '/audit',        icon: ScrollText, label: 'Audit Logs' },
 ]
 
 export default function Layout() {

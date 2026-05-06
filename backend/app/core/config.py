@@ -8,21 +8,12 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
 
-    # ── MySQL connection ──────────────────────────────────────────────────────
-    # Format: mysql+pymysql://user:password@host:port/dbname?charset=utf8mb4
-    MYSQL_USER: str = "txsign_user"
-    MYSQL_PASSWORD: str = "txsign_pass"
-    MYSQL_HOST: str = "localhost"
-    MYSQL_PORT: int = 3306
-    MYSQL_DB: str = "txsign_db"
+    # Suppress TensorFlow verbose logs
+    TF_CPP_MIN_LOG_LEVEL: str = "2"
+    TF_ENABLE_ONEDNN_OPTS: str = "0"
 
-    @property
-    def DATABASE_URL(self) -> str:
-        return (
-            f"mysql+pymysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}"
-            f"@{self.MYSQL_HOST}:{self.MYSQL_PORT}/{self.MYSQL_DB}"
-            f"?charset=utf8mb4"
-        )
+    # Database — SQLite for demo, swap DATABASE_URL for production
+    DATABASE_URL: str = "sqlite:///./txsign.db"
 
     # Security
     SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION_USE_32_BYTES_MIN"
@@ -34,6 +25,18 @@ class Settings(BaseSettings):
 
     # Replay attack window in seconds (5 minutes)
     REPLAY_WINDOW_SECONDS: int = 300
+
+    # Key TTL — key expires this many seconds after generation (180 = 3 minutes)
+    KEY_TTL_SECONDS: int = 180
+
+    # ── Face Verification ─────────────────────────────────────────────────────
+    FACE_MODEL: str = "Facenet"                 # DeepFace model
+    FACE_DISTANCE_THRESHOLD: float = 0.6        # cosine distance threshold
+    FACE_MAX_ATTEMPTS: int = 5                  # rate limit per 10 min window
+    FACE_RATE_WINDOW_SECONDS: int = 600         # 10 minute rate limit window
+    FACE_REQUIRED_FOR_SIGNING: bool = True      # enforce face check on sign
+    FACE_REQUIRED_FOR_LOGIN: bool = False       # optional on login
+    FACE_ENFORCE_DETECTION: bool = False        # False = try all backends incl. skip
 
     # CORS
     ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]

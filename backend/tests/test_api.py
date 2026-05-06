@@ -77,7 +77,7 @@ class TestTransactionFlow:
     def test_sign_and_verify_success(self, client, auth_headers):
         key_id, priv = self._setup(client, auth_headers)
 
-        sign_resp = client.post("/api/v1/transactions/sign", headers=auth_headers, json={
+        sign_resp = client.post("/api/v1/transactions/sign-json", headers=auth_headers, json={
             "transaction": {
                 "receiver_id": "receiver-001",
                 "amount": 100.00,
@@ -118,10 +118,10 @@ class TestTransactionFlow:
             "key_id": key_id,
         }
 
-        r1 = client.post("/api/v1/transactions/sign", headers=auth_headers, json=payload)
+        r1 = client.post("/api/v1/transactions/sign-json", headers=auth_headers, json=payload)
         assert r1.status_code == 201
 
-        r2 = client.post("/api/v1/transactions/sign", headers=auth_headers, json=payload)
+        r2 = client.post("/api/v1/transactions/sign-json", headers=auth_headers, json=payload)
         assert r2.status_code == 409  # Conflict — replay detected
 
     def test_tamper_detection_via_verify_payload(self, client, auth_headers):
@@ -164,7 +164,7 @@ class TestTransactionFlow:
         key_id, priv = self._setup(client, auth_headers)
         old_ts = (datetime.utcnow() - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
 
-        r = client.post("/api/v1/transactions/sign", headers=auth_headers, json={
+        r = client.post("/api/v1/transactions/sign-json", headers=auth_headers, json={
             "transaction": {
                 "receiver_id": "receiver-001",
                 "amount": 75.00,

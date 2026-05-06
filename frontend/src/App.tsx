@@ -9,6 +9,7 @@ import SignTransactionPage from './pages/SignTransactionPage'
 import VerifyTransactionPage from './pages/VerifyTransactionPage'
 import TransactionsPage from './pages/TransactionsPage'
 import AuditLogsPage from './pages/AuditLogsPage'
+import FaceEnrollPage from './pages/FaceEnrollPage'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -34,6 +35,7 @@ function AppRoutes() {
         <Route path="sign" element={<SignTransactionPage />} />
         <Route path="verify" element={<VerifyTransactionPage />} />
         <Route path="audit" element={<AuditLogsPage />} />
+        <Route path="face" element={<FaceEnrollPage />} />
       </Route>
     </Routes>
   )

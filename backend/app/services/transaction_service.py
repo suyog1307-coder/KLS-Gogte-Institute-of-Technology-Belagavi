@@ -244,3 +244,63 @@ class TransactionService:
             .limit(limit)
             .all()
         )
+
+    def list_received(
+        self, username: str, limit: int = 50, offset: int = 0
+    ) -> list[Transaction]:
+        """
+        Return transactions where receiver_id matches the user's username or user_id.
+        Supports both formats since receiver_id is a free-text field.
+        """
+        from app.models.models import User
+        # Find user by username to also match by user_id
+        user = self.db.query(User).filter(User.username == username).first()
+        user_id = user.id if user else None
+
+        query = self.db.query(Transaction).filter(
+            (Transaction.receiver_id == username) |
+            (Transaction.receiver_id == user_id if user_id else False)
+        )
+        return (
+            query.order_by(Transaction.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+    def get_balance_summary(self, user_id: str, username: str) -> dict:
+        """
+        Compute total sent, total received, and transaction counts.
+        Only counts verified transactions.
+        """
+        from sqlalchemy import func
+        from app.models.models import User
+
+        user = self.db.query(User).filter(User.id == user_id).first()
+        uname = user.username if user else username
+
+        # Total sent (verified)
+        sent = self.db.query(
+            func.count(Transaction.id).label("count"),
+            func.coalesce(func.sum(Transaction.amount), 0).label("total"),
+        ).filter(
+            Transaction.sender_id == user_id,
+            Transaction.status == "verified",
+        ).first()
+
+        # Total received (verified) — match by username or user_id
+        recv = self.db.query(
+            func.count(Transaction.id).label("count"),
+            func.coalesce(func.sum(Transaction.amount), 0).label("total"),
+        ).filter(
+            (Transaction.receiver_id == uname) | (Transaction.receiver_id == user_id),
+            Transaction.status == "verified",
+        ).first()
+
+        return {
+            "sent_count":    sent.count  if sent  else 0,
+            "sent_total":    float(sent.total)  if sent  else 0.0,
+            "recv_count":    recv.count  if recv  else 0,
+            "recv_total":    float(recv.total)  if recv  else 0.0,
+            "net_balance":   float(recv.total or 0) - float(sent.total or 0),
+        }
