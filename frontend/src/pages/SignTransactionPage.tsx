@@ -138,18 +138,9 @@ export default function SignTransactionPage() {
 
       if (status === 401 && detail.toLowerCase().includes('face')) {
         toast.error('Face verification failed — transaction blocked', { duration: 6000 })
-        // Fresh nonce + timestamp + clear face for retry
         setCaptured(null)
         setForm((f) => ({ ...f, nonce: generateNonce(), timestamp: freshTimestamp() }))
         setStep('face')
-      } else if (status === 410 || detail.toUpperCase().includes('KEY_EXPIRED')) {
-        // Key expired — must generate a new key
-        toast.error('⏰ Signing key expired! Please generate a new key pair.', { duration: 7000 })
-        setCaptured(null)
-        setKeyId('')
-        setPrivateKey('')
-        setForm((f) => ({ ...f, nonce: generateNonce(), timestamp: freshTimestamp() }))
-        setStep('form')
       } else if (status === 404 && detail.toLowerCase().includes('face')) {
         toast.error('No face enrolled. Please enroll your face first.', { duration: 6000 })
         setForm((f) => ({ ...f, nonce: generateNonce(), timestamp: freshTimestamp() }))

@@ -4,81 +4,28 @@
  * Every time "Generate Key Pair" is clicked:
  *  - A brand new Key ID, Private Key, and Public Key are generated
  *  - ALL three are displayed IMMEDIATELY — no clicks, no toggles
- *  - 3-minute countdown timer starts
- *  - Private key is shown in full (it is NEVER shown again after leaving)
+ *  - Keys stay active until manually revoked (no timer/expiry)
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
-  KeyRound, Plus, Copy, Clock, XCircle, RefreshCw, CheckCircle, ShieldAlert,
+  KeyRound, Plus, Copy, RefreshCw,
+  CheckCircle, ShieldAlert, ShieldCheck, XCircle,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { keysApi } from '../services/api'
 import { format } from 'date-fns'
 
 interface KeyPair {
-  key_id:             string
-  public_key_pem:     string
-  algorithm:          string
-  created_at:         string
-  expires_at?:        string
-  seconds_remaining?: number
-  private_key_pem?:   string
-}
-
-// ── Countdown hook ─────────────────────────────────────────────────────────
-function useCountdown(expiresAt: string | undefined, onExpire: () => void) {
-  const [secs, setSecs] = useState(0)
-  const cb = useRef(onExpire)
-  cb.current = onExpire
-
-  useEffect(() => {
-    if (!expiresAt) return
-    const tick = () => {
-      const diff = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
-      setSecs(diff)
-      if (diff === 0) cb.current()
-    }
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
-  }, [expiresAt])
-
-  return secs
-}
-
-// ── Ring timer ─────────────────────────────────────────────────────────────
-function KeyTimer({ expiresAt, onExpired }: { expiresAt?: string; onExpired: () => void }) {
-  const secs = useCountdown(expiresAt, onExpired)
-  if (!expiresAt) return null
-
-  if (secs === 0) return (
-    <span className="flex items-center gap-1 text-xs text-red-400 font-semibold">
-      <XCircle size={13} /> EXPIRED
-    </span>
-  )
-
-  const color = secs > 60 ? '#22c55e' : secs > 30 ? '#f59e0b' : '#ef4444'
-  const r = 10, circ = 2 * Math.PI * r
-  const pct = Math.min(100, (secs / 180) * 100)
-  const mm = String(Math.floor(secs / 60)).padStart(2, '0')
-  const ss = String(secs % 60).padStart(2, '0')
-
-  return (
-    <span className="flex items-center gap-1.5 font-mono font-bold text-sm" style={{ color }}>
-      <svg width="28" height="28" viewBox="0 0 24 24" className="-rotate-90">
-        <circle cx="12" cy="12" r={r} fill="none" stroke="#374151" strokeWidth="2.5" />
-        <circle cx="12" cy="12" r={r} fill="none" stroke={color} strokeWidth="2.5"
-          strokeDasharray={`${(pct / 100) * circ} ${circ}`}
-          strokeLinecap="round"
-          style={{ transition: 'stroke-dasharray 1s linear, stroke 1s' }} />
-      </svg>
-      {mm}:{ss}
-    </span>
-  )
+  key_id:            string
+  public_key_pem:    string
+  algorithm:         string
+  created_at:        string
+  expires_at?:       string | null
+  private_key_pem?:  string
 }
 
 // ── One-click copy button ──────────────────────────────────────────────────
-function CopyBtn({ text, label, size = 'sm' }: { text: string; label: string; size?: 'sm' | 'lg' }) {
+function CopyBtn({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false)
   const copy = () => {
     navigator.clipboard.writeText(text)
@@ -88,45 +35,40 @@ function CopyBtn({ text, label, size = 'sm' }: { text: string; label: string; si
   }
   return (
     <button onClick={copy}
-      className={`flex items-center gap-1.5 rounded-lg transition-colors shrink-0 ${
-        size === 'lg'
-          ? 'px-3 py-1.5 text-sm bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-700/50'
-          : 'px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300'
-      }`}>
+      className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-lg
+                 bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors shrink-0">
       {copied
-        ? <><CheckCircle size={13} className="text-green-400" /> Copied!</>
-        : <><Copy size={13} /> Copy</>}
+        ? <><CheckCircle size={12} className="text-green-400" /> Copied!</>
+        : <><Copy size={12} /> Copy</>}
     </button>
   )
 }
 
 // ── Key field box ──────────────────────────────────────────────────────────
 function KeyField({
-  label, value, color = 'blue', highlight = false,
+  label, value, color = 'blue', warning,
 }: {
-  label: string; value: string; color?: 'blue' | 'green' | 'gray'; highlight?: boolean
+  label: string; value: string; color?: 'blue' | 'green' | 'gray'; warning?: string
 }) {
   const textColor = { blue: 'text-blue-300', green: 'text-green-300', gray: 'text-gray-200' }[color]
-  const border    = highlight ? 'border-red-600/70' : 'border-gray-700'
+  const border    = warning ? 'border-red-600/60' : 'border-gray-700'
 
   return (
     <div className={`rounded-xl border ${border} bg-gray-950 overflow-hidden`}>
-      {/* Label bar */}
-      <div className={`flex items-center justify-between px-4 py-2 border-b ${border} bg-gray-900`}>
-        <span className="text-xs font-bold uppercase tracking-widest text-gray-400">
-          {label}
-          {highlight && (
-            <span className="ml-2 text-red-400 normal-case font-normal">
-              ⚠ Save now — shown only once!
-            </span>
+      <div className={`flex items-center justify-between px-4 py-2.5 border-b ${border} bg-gray-900`}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-bold uppercase tracking-widest text-gray-400 shrink-0">
+            {label}
+          </span>
+          {warning && (
+            <span className="text-xs text-red-400 font-medium">{warning}</span>
           )}
-        </span>
-        <CopyBtn text={value} label={label} size="sm" />
+        </div>
+        <CopyBtn text={value} label={label} />
       </div>
-      {/* Value */}
       <pre className={`px-4 py-3 text-xs font-mono ${textColor} whitespace-pre-wrap break-all
                        select-all leading-relaxed overflow-y-auto`}
-           style={{ maxHeight: highlight ? '220px' : '120px' }}>
+           style={{ maxHeight: color === 'green' ? '200px' : '110px' }}>
         {value}
       </pre>
     </div>
@@ -156,10 +98,10 @@ export default function KeysPage() {
 
   const generateKey = async () => {
     setGenerating(true)
-    setNewKey(null)   // clear previous key first so React re-renders fresh
+    setNewKey(null)   // clear previous so React always re-renders fresh
     try {
       const { data } = await keysApi.generate()
-      setNewKey(data)  // set new key — ALL fields shown immediately, no toggle
+      setNewKey(data)
       toast.success('New key pair generated! Copy your private key now.')
       keysApi.list().then(({ data: list }) => setKeys(list)).catch(() => {})
     } catch (err: any) {
@@ -168,12 +110,6 @@ export default function KeysPage() {
       setGenerating(false)
     }
   }
-
-  const handleExpired = useCallback(() => {
-    toast.error('Key expired! Generate a new key pair.', { duration: 5000 })
-    setNewKey(null)
-    fetchKeys()
-  }, [fetchKeys])
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -186,12 +122,12 @@ export default function KeysPage() {
             Key Management
           </h1>
           <p className="text-gray-400 mt-1 text-sm">
-            Each key pair is unique · Expires in <strong className="text-white">3 minutes</strong> ·
+            ECDSA P-256 key pairs · Keys stay active until revoked ·
             Private key shown <strong className="text-white">once only</strong>
           </p>
         </div>
         <button onClick={generateKey} disabled={generating}
-          className="btn-primary flex items-center gap-2 text-sm px-4 py-2">
+          className="btn-primary flex items-center gap-2">
           <Plus size={18} />
           {generating ? 'Generating...' : 'Generate Key Pair'}
         </button>
@@ -199,12 +135,13 @@ export default function KeysPage() {
 
       {/* ── Info banner ── */}
       <div className="card border-blue-800 bg-blue-900/10 flex items-start gap-3 py-3">
-        <Clock className="text-blue-400 shrink-0 mt-0.5" size={18} />
+        <ShieldCheck className="text-blue-400 shrink-0 mt-0.5" size={18} />
         <p className="text-xs text-blue-300/80">
           <strong className="text-blue-300">How it works:</strong> Click "Generate Key Pair" →
-          A unique Key ID, Private Key, and Public Key appear instantly →
-          Copy the Private Key → Use it to sign a transaction within 3 minutes →
-          Key auto-expires and a new one must be generated for the next transaction.
+          Copy the <strong className="text-white">Key ID</strong> and{' '}
+          <strong className="text-white">Private Key</strong> →
+          Use them in the Sign Transaction page.
+          Keys stay active until you revoke them.
         </p>
       </div>
 
@@ -212,26 +149,21 @@ export default function KeysPage() {
       {newKey && (
         <div className="rounded-2xl border-2 border-yellow-600/60 bg-yellow-950/20 p-5 space-y-4">
 
-          {/* Title + timer */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <ShieldAlert className="text-yellow-400" size={22} />
-              <div>
-                <h2 className="text-yellow-300 font-bold text-lg">New Key Pair Generated</h2>
-                <p className="text-yellow-500/70 text-xs mt-0.5">
-                  All details are shown below. Copy and save your private key before the timer runs out.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-col items-center gap-0.5">
-              <KeyTimer expiresAt={newKey.expires_at} onExpired={handleExpired} />
-              <span className="text-xs text-gray-500">remaining</span>
+          {/* Title */}
+          <div className="flex items-center gap-3">
+            <ShieldAlert className="text-yellow-400 shrink-0" size={22} />
+            <div>
+              <h2 className="text-yellow-300 font-bold text-lg">New Key Pair Generated</h2>
+              <p className="text-yellow-500/70 text-xs mt-0.5">
+                Copy and save your <strong className="text-yellow-300">Private Key</strong> now —
+                it will <strong className="text-yellow-300">never be shown again</strong>.
+              </p>
             </div>
           </div>
 
-          {/* ── KEY ID — full UUID ── */}
+          {/* ── KEY ID ── */}
           <KeyField
-            label="Key ID (use this in Sign Transaction)"
+            label="Key ID — use this in Sign Transaction"
             value={newKey.key_id}
             color="blue"
           />
@@ -241,7 +173,7 @@ export default function KeysPage() {
             label="Private Key (PEM)"
             value={newKey.private_key_pem ?? '(not available)'}
             color="green"
-            highlight={true}
+            warning="⚠ Save now — shown only once!"
           />
 
           {/* ── PUBLIC KEY ── */}
@@ -251,17 +183,13 @@ export default function KeysPage() {
             color="gray"
           />
 
-          {/* Meta info */}
+          {/* Meta */}
           <div className="flex flex-wrap gap-4 text-xs text-gray-500 pt-1 border-t border-gray-800">
             <span>Algorithm: <strong className="text-gray-300">{newKey.algorithm}</strong></span>
             <span>Generated: <strong className="text-gray-300">
               {format(new Date(newKey.created_at), 'dd MMM yyyy, HH:mm:ss')}
             </strong></span>
-            {newKey.expires_at && (
-              <span>Expires at: <strong className="text-yellow-400">
-                {format(new Date(newKey.expires_at), 'HH:mm:ss')}
-              </strong></span>
-            )}
+            <span className="text-green-500">✓ No expiry — stays active until revoked</span>
           </div>
 
         </div>
@@ -270,7 +198,7 @@ export default function KeysPage() {
       {/* ── KEY HISTORY LIST ── */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-white">Key History</h2>
+          <h2 className="font-semibold text-white">Your Key Pairs</h2>
           <button onClick={fetchKeys}
             className="text-gray-500 hover:text-white transition-colors p-1" title="Refresh">
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
@@ -285,44 +213,31 @@ export default function KeysPage() {
           </p>
         ) : (
           <div className="space-y-2">
-            {keys.map((k) => {
-              const expired = k.expires_at ? new Date(k.expires_at) < new Date() : false
-              return (
-                <div key={k.key_id}
-                  className={`rounded-xl p-3 flex items-center gap-3 ${
-                    expired ? 'bg-gray-800/30 opacity-50' : 'bg-gray-800'
-                  }`}>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="badge-blue text-xs">{k.algorithm}</span>
-                      {expired
-                        ? <span className="badge-red text-xs flex items-center gap-1">
-                            <XCircle size={10} /> Expired
-                          </span>
-                        : <span className="badge-green text-xs">Active</span>}
-                      <span className="text-xs text-gray-500">
-                        {format(new Date(k.created_at), 'dd MMM yyyy, HH:mm:ss')}
-                      </span>
-                    </div>
-                    {/* Full key ID always visible */}
-                    <code className="text-xs text-gray-300 font-mono break-all leading-relaxed">
-                      {k.key_id}
-                    </code>
+            {keys.map((k) => (
+              <div key={k.key_id} className="rounded-xl p-3 bg-gray-800 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <span className="badge-blue text-xs">{k.algorithm}</span>
+                    <span className="badge-green text-xs flex items-center gap-1">
+                      <CheckCircle size={10} /> Active
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {format(new Date(k.created_at), 'dd MMM yyyy, HH:mm:ss')}
+                    </span>
                   </div>
-
-                  {!expired && k.expires_at && (
-                    <KeyTimer expiresAt={k.expires_at} onExpired={fetchKeys} />
-                  )}
-
-                  <button
-                    onClick={() => { navigator.clipboard.writeText(k.key_id); toast.success('Key ID copied!') }}
-                    className="text-gray-500 hover:text-blue-400 transition-colors p-1 shrink-0"
-                    title="Copy Key ID">
-                    <Copy size={15} />
-                  </button>
+                  {/* Full key ID always visible */}
+                  <code className="text-xs text-gray-300 font-mono break-all leading-relaxed">
+                    {k.key_id}
+                  </code>
                 </div>
-              )
-            })}
+                <button
+                  onClick={() => { navigator.clipboard.writeText(k.key_id); toast.success('Key ID copied!') }}
+                  className="text-gray-500 hover:text-blue-400 transition-colors p-1 shrink-0"
+                  title="Copy Key ID">
+                  <Copy size={15} />
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -2,7 +2,6 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.models.base import get_db
 from app.models.models import KeyPair, User
@@ -21,8 +20,8 @@ def generate_keys(
 ):
     """
     Generate a new ECDSA P-256 key pair.
-    Key expires after KEY_TTL_SECONDS (default 180s).
     Private key returned ONCE — never stored in plaintext.
+    Keys stay active until manually revoked.
     """
     svc = KeyService(db)
     key_pair, private_pem = svc.generate_and_store(current_user)
@@ -30,23 +29,18 @@ def generate_keys(
     AuditService(db).log(
         "KEY_GENERATED",
         actor_id   = current_user.id,
-        detail     = {
-            "key_id":    key_pair.id,
-            "algorithm": key_pair.algorithm,
-            "expires_at": key_pair.expires_at.isoformat() if key_pair.expires_at else None,
-            "ttl_seconds": settings.KEY_TTL_SECONDS,
-        },
+        detail     = {"key_id": key_pair.id, "algorithm": key_pair.algorithm},
         ip_address = request.client.host if request.client else None,
     )
 
     return KeyPairOut(
-        key_id           = key_pair.id,
-        public_key_pem   = key_pair.public_key_pem,
-        algorithm        = key_pair.algorithm,
-        created_at       = key_pair.created_at,
-        expires_at       = key_pair.expires_at,
-        seconds_remaining = svc.seconds_remaining(key_pair),
-        private_key_pem  = private_pem,
+        key_id          = key_pair.id,
+        public_key_pem  = key_pair.public_key_pem,
+        algorithm       = key_pair.algorithm,
+        created_at      = key_pair.created_at,
+        expires_at      = None,
+        seconds_remaining = None,
+        private_key_pem = private_pem,
     )
 
 
@@ -55,8 +49,7 @@ def list_my_keys(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all key pairs (public keys only). Shows expiry status."""
-    now  = datetime.utcnow()
+    """List all key pairs (public keys only)."""
     keys = (
         db.query(KeyPair)
         .filter(KeyPair.user_id == current_user.id)
@@ -65,14 +58,13 @@ def list_my_keys(
     )
     return [
         KeyPairOut(
-            key_id            = k.id,
-            public_key_pem    = k.public_key_pem,
-            algorithm         = k.algorithm,
-            created_at        = k.created_at,
-            expires_at        = k.expires_at,
-            seconds_remaining = max(0, int((k.expires_at - now).total_seconds()))
-                                if k.expires_at and k.is_active else 0,
-            private_key_pem   = None,
+            key_id          = k.id,
+            public_key_pem  = k.public_key_pem,
+            algorithm       = k.algorithm,
+            created_at      = k.created_at,
+            expires_at      = None,
+            seconds_remaining = None,
+            private_key_pem = None,
         )
         for k in keys
     ]
@@ -84,6 +76,7 @@ def revoke_key(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Revoke (deactivate) a key pair."""
     svc = KeyService(db)
     if not svc.revoke_key(key_id, current_user.id):
         raise HTTPException(status_code=404, detail="Key not found")

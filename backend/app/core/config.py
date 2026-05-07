@@ -26,9 +26,6 @@ class Settings(BaseSettings):
     # Replay attack window in seconds (5 minutes)
     REPLAY_WINDOW_SECONDS: int = 300
 
-    # Key TTL — key expires this many seconds after generation (180 = 3 minutes)
-    KEY_TTL_SECONDS: int = 180
-
     # ── Face Verification ─────────────────────────────────────────────────────
     FACE_MODEL: str = "Facenet"                 # DeepFace model
     FACE_DISTANCE_THRESHOLD: float = 0.6        # cosine distance threshold
