@@ -268,9 +268,26 @@ def get_transaction(
     tx  = svc.get_transaction(transaction_id)
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    # Allow sender OR receiver to view
+    # Allow sender OR receiver to view — no one can delete
     if tx.sender_id != current_user.id and tx.receiver_id not in (
         current_user.id, current_user.username
     ):
         raise HTTPException(status_code=403, detail="Access denied")
     return _enrich(tx, db)
+
+
+# ── Explicitly block DELETE on transactions (immutable audit trail) ───────────
+
+@router.delete("/{transaction_id}", status_code=403)
+def delete_transaction_blocked():
+    """
+    Transactions are immutable and cannot be deleted.
+    This endpoint exists only to return a clear error if attempted.
+    """
+    raise HTTPException(
+        status_code = 403,
+        detail      = (
+            "Transactions are immutable and cannot be deleted. "
+            "They form part of the cryptographic audit trail."
+        ),
+    )

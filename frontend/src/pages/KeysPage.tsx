@@ -1,86 +1,98 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { KeyRound, Plus, Copy, Eye, EyeOff, AlertTriangle, Clock, XCircle, RefreshCw } from 'lucide-react'
+import {
+  KeyRound, Plus, Copy, Eye, EyeOff,
+  AlertTriangle, Clock, XCircle, RefreshCw, CheckCircle,
+} from 'lucide-react'
 import toast from 'react-hot-toast'
 import { keysApi } from '../services/api'
 import { format } from 'date-fns'
 
 interface KeyPair {
-  key_id:            string
-  public_key_pem:    string
-  algorithm:         string
-  created_at:        string
-  expires_at?:       string
+  key_id:             string
+  public_key_pem:     string
+  algorithm:          string
+  created_at:         string
+  expires_at?:        string
   seconds_remaining?: number
-  private_key_pem?:  string
+  private_key_pem?:   string
 }
 
-// ── Countdown hook ────────────────────────────────────────────────────────────
+// ── Countdown hook ─────────────────────────────────────────────────────────
 function useCountdown(expiresAt: string | undefined, onExpire: () => void) {
-  const [secondsLeft, setSecondsLeft] = useState<number>(0)
-  const cbRef = useRef(onExpire)
-  cbRef.current = onExpire
+  const [secs, setSecs] = useState(0)
+  const cb = useRef(onExpire)
+  cb.current = onExpire
 
   useEffect(() => {
     if (!expiresAt) return
     const tick = () => {
       const diff = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
-      setSecondsLeft(diff)
-      if (diff === 0) cbRef.current()
+      setSecs(diff)
+      if (diff === 0) cb.current()
     }
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [expiresAt])
 
-  return secondsLeft
+  return secs
 }
 
-// ── Timer badge for a single key ──────────────────────────────────────────────
+// ── Ring timer ─────────────────────────────────────────────────────────────
 function KeyTimer({ expiresAt, onExpired }: { expiresAt?: string; onExpired: () => void }) {
-  const secs = useCountdown(expiresAt, onExpired)
-
+  const secs  = useCountdown(expiresAt, onExpired)
   if (!expiresAt) return null
+
+  if (secs === 0) return (
+    <span className="flex items-center gap-1 text-xs text-red-400 font-medium">
+      <XCircle size={13} /> Expired
+    </span>
+  )
 
   const pct   = Math.min(100, (secs / 180) * 100)
   const color = secs > 60 ? '#22c55e' : secs > 30 ? '#f59e0b' : '#ef4444'
-  const r     = 10
-  const circ  = 2 * Math.PI * r
-  const dash  = (pct / 100) * circ
-
-  if (secs === 0) {
-    return (
-      <span className="flex items-center gap-1 text-xs text-red-400 font-medium">
-        <XCircle size={13} /> Expired
-      </span>
-    )
-  }
-
+  const r = 10, circ = 2 * Math.PI * r
   const mm = String(Math.floor(secs / 60)).padStart(2, '0')
   const ss = String(secs % 60).padStart(2, '0')
 
   return (
-    <span className="flex items-center gap-1.5 text-xs font-mono font-semibold"
-          style={{ color }}>
-      {/* SVG ring */}
+    <span className="flex items-center gap-1.5 text-xs font-mono font-semibold" style={{ color }}>
       <svg width="24" height="24" viewBox="0 0 24 24" className="-rotate-90">
         <circle cx="12" cy="12" r={r} fill="none" stroke="#374151" strokeWidth="2.5" />
         <circle cx="12" cy="12" r={r} fill="none" stroke={color} strokeWidth="2.5"
-          strokeDasharray={`${dash} ${circ}`}
+          strokeDasharray={`${(pct / 100) * circ} ${circ}`}
           strokeLinecap="round"
-          style={{ transition: 'stroke-dasharray 1s linear, stroke 1s' }}
-        />
+          style={{ transition: 'stroke-dasharray 1s linear, stroke 1s' }} />
       </svg>
       {mm}:{ss}
     </span>
   )
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Copy button ────────────────────────────────────────────────────────────
+function CopyBtn({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    toast.success(`${label} copied`)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <button onClick={copy}
+      className="text-xs text-blue-400 hover:underline flex items-center gap-1 shrink-0">
+      {copied ? <CheckCircle size={12} className="text-green-400" /> : <Copy size={12} />}
+      {copied ? 'Copied!' : 'Copy'}
+    </button>
+  )
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────
 export default function KeysPage() {
-  const [keys, setKeys]           = useState<KeyPair[]>([])
-  const [newKey, setNewKey]       = useState<KeyPair | null>(null)
+  const [keys, setKeys]             = useState<KeyPair[]>([])
+  const [newKey, setNewKey]         = useState<KeyPair | null>(null)
   const [showPrivate, setShowPrivate] = useState(false)
-  const [loading, setLoading]     = useState(false)
+  const [loading, setLoading]       = useState(false)
   const [generating, setGenerating] = useState(false)
 
   const fetchKeys = useCallback(async () => {
@@ -101,23 +113,19 @@ export default function KeysPage() {
     setGenerating(true)
     try {
       const { data } = await keysApi.generate()
+      // ── FIX: set newKey FIRST, then refresh list in background ──
       setNewKey(data)
       setShowPrivate(false)
       toast.success('Key pair generated! You have 3 minutes to sign a transaction.')
-      fetchKeys()
-    } catch {
-      toast.error('Key generation failed')
+      // Refresh list without clearing newKey
+      keysApi.list().then(({ data: list }) => setKeys(list)).catch(() => {})
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Key generation failed')
     } finally {
       setGenerating(false)
     }
   }
 
-  const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text)
-    toast.success(`${label} copied`)
-  }
-
-  // When the new key's timer expires, refresh the list
   const handleNewKeyExpired = useCallback(() => {
     toast.error('Key expired! Generate a new key pair.', { duration: 5000 })
     setNewKey(null)
@@ -126,6 +134,7 @@ export default function KeysPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -134,7 +143,8 @@ export default function KeysPage() {
             Key Management
           </h1>
           <p className="text-gray-400 mt-1">
-            ECDSA P-256 key pairs · Each key expires in <strong className="text-white">3 minutes</strong>
+            ECDSA P-256 key pairs · Each key expires in{' '}
+            <strong className="text-white">3 minutes</strong>
           </p>
         </div>
         <button onClick={generateKey} disabled={generating}
@@ -157,7 +167,7 @@ export default function KeysPage() {
         </div>
       </div>
 
-      {/* New key panel — shown immediately after generation */}
+      {/* ── New key panel ── */}
       {newKey && (
         <div className="card border-yellow-700 bg-yellow-900/10">
           <div className="flex items-start justify-between mb-4">
@@ -166,25 +176,24 @@ export default function KeysPage() {
               <div>
                 <h3 className="font-semibold text-yellow-300">Save Your Private Key Now</h3>
                 <p className="text-xs text-yellow-400/80 mt-1">
-                  This is the ONLY time your private key is shown. It is never stored on the server.
+                  This is the <strong>ONLY time</strong> your private key is shown.
+                  It is never stored on the server.
                 </p>
               </div>
             </div>
-            {/* Live countdown */}
             <KeyTimer expiresAt={newKey.expires_at} onExpired={handleNewKeyExpired} />
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
+
             {/* Key ID */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="label">Key ID</span>
-                <button onClick={() => copyToClipboard(newKey.key_id, 'Key ID')}
-                  className="text-xs text-blue-400 hover:underline flex items-center gap-1">
-                  <Copy size={12} /> Copy
-                </button>
+                <CopyBtn text={newKey.key_id} label="Key ID" />
               </div>
-              <code className="block bg-gray-800 rounded p-2 text-xs text-gray-300 break-all">
+              <code className="block bg-gray-900 border border-gray-700 rounded-lg p-3
+                               text-sm text-blue-300 font-mono break-all select-all">
                 {newKey.key_id}
               </code>
             </div>
@@ -193,25 +202,29 @@ export default function KeysPage() {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="label">Private Key (PEM)</span>
-                <div className="flex gap-2">
+                <div className="flex gap-3">
                   <button onClick={() => setShowPrivate(!showPrivate)}
                     className="text-xs text-gray-400 hover:text-white flex items-center gap-1">
                     {showPrivate ? <EyeOff size={12} /> : <Eye size={12} />}
                     {showPrivate ? 'Hide' : 'Show'}
                   </button>
-                  <button onClick={() => copyToClipboard(newKey.private_key_pem!, 'Private key')}
-                    className="text-xs text-blue-400 hover:underline flex items-center gap-1">
-                    <Copy size={12} /> Copy
-                  </button>
+                  {newKey.private_key_pem && (
+                    <CopyBtn text={newKey.private_key_pem} label="Private key" />
+                  )}
                 </div>
               </div>
-              {showPrivate ? (
-                <pre className="bg-gray-800 rounded p-3 text-xs text-green-400 overflow-x-auto whitespace-pre-wrap break-all">
+              {showPrivate && newKey.private_key_pem ? (
+                <pre className="bg-gray-900 border border-gray-700 rounded-lg p-3
+                                text-xs text-green-400 font-mono overflow-x-auto
+                                whitespace-pre-wrap break-all select-all max-h-48">
                   {newKey.private_key_pem}
                 </pre>
               ) : (
-                <div className="bg-gray-800 rounded p-3 text-xs text-gray-500 text-center">
-                  Click "Show" to reveal private key
+                <div className="bg-gray-900 border border-gray-700 rounded-lg p-3
+                                text-xs text-gray-500 text-center cursor-pointer
+                                hover:border-gray-600 transition-colors"
+                  onClick={() => setShowPrivate(true)}>
+                  🔒 Click "Show" to reveal private key
                 </div>
               )}
             </div>
@@ -220,75 +233,77 @@ export default function KeysPage() {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="label">Public Key (PEM)</span>
-                <button onClick={() => copyToClipboard(newKey.public_key_pem, 'Public key')}
-                  className="text-xs text-blue-400 hover:underline flex items-center gap-1">
-                  <Copy size={12} /> Copy
-                </button>
+                <CopyBtn text={newKey.public_key_pem} label="Public key" />
               </div>
-              <pre className="bg-gray-800 rounded p-3 text-xs text-blue-300 overflow-x-auto whitespace-pre-wrap break-all">
+              <pre className="bg-gray-900 border border-gray-700 rounded-lg p-3
+                              text-xs text-blue-300 font-mono overflow-x-auto
+                              whitespace-pre-wrap break-all select-all max-h-36">
                 {newKey.public_key_pem}
               </pre>
             </div>
+
           </div>
         </div>
       )}
 
-      {/* All keys list */}
+      {/* ── All keys list ── */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-white">Your Key Pairs</h2>
-          <button onClick={fetchKeys} className="text-gray-500 hover:text-white transition-colors">
+          <button onClick={fetchKeys}
+            className="text-gray-500 hover:text-white transition-colors p-1">
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
 
-        {loading ? (
+        {loading && keys.length === 0 ? (
           <p className="text-gray-500 text-sm">Loading...</p>
         ) : keys.length === 0 ? (
           <p className="text-gray-500 text-sm">
-            No keys yet. Generate your first key pair above.
+            No keys yet. Click <strong className="text-white">Generate Key Pair</strong> above.
           </p>
         ) : (
           <div className="space-y-2">
             {keys.map((k) => {
               const isExpired = k.expires_at
-                ? new Date(k.expires_at) < new Date()
-                : false
+                ? new Date(k.expires_at) < new Date() : false
 
               return (
                 <div key={k.key_id}
-                  className={`rounded-lg p-3 flex items-center justify-between gap-4 ${
-                    isExpired ? 'bg-gray-800/40 opacity-50' : 'bg-gray-800'
+                  className={`rounded-lg p-3 flex items-center gap-3 transition-opacity ${
+                    isExpired ? 'bg-gray-800/30 opacity-50' : 'bg-gray-800'
                   }`}>
+
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                       <span className="badge-blue">{k.algorithm}</span>
-                      {isExpired ? (
-                        <span className="badge-red flex items-center gap-1">
-                          <XCircle size={10} /> Expired
-                        </span>
-                      ) : (
-                        <span className="badge-green">Active</span>
-                      )}
+                      {isExpired
+                        ? <span className="badge-red flex items-center gap-1">
+                            <XCircle size={10} /> Expired
+                          </span>
+                        : <span className="badge-green">Active</span>
+                      }
                       <span className="text-xs text-gray-500">
-                        {format(new Date(k.created_at), 'MMM d, HH:mm:ss')}
+                        {format(new Date(k.created_at), 'MMM d, yyyy HH:mm:ss')}
                       </span>
                     </div>
-                    <code className="text-xs text-gray-400 break-all">{k.key_id}</code>
+                    {/* Full key ID */}
+                    <code className="text-xs text-gray-300 font-mono break-all">
+                      {k.key_id}
+                    </code>
                   </div>
 
-                  {/* Timer for active keys */}
+                  {/* Timer */}
                   {!isExpired && k.expires_at && (
-                    <KeyTimer
-                      expiresAt={k.expires_at}
-                      onExpired={fetchKeys}
-                    />
+                    <KeyTimer expiresAt={k.expires_at} onExpired={fetchKeys} />
                   )}
 
-                  <button onClick={() => copyToClipboard(k.key_id, 'Key ID')}
-                    className="text-gray-500 hover:text-blue-400 transition-colors shrink-0"
+                  {/* Copy key ID */}
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(k.key_id); toast.success('Key ID copied') }}
+                    className="text-gray-500 hover:text-blue-400 transition-colors shrink-0 p-1"
                     title="Copy Key ID">
-                    <Copy size={16} />
+                    <Copy size={15} />
                   </button>
                 </div>
               )
