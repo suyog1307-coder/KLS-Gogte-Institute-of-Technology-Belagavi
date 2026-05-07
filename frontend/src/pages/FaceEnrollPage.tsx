@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import FaceCapture, { FaceCaptureResult } from '../components/FaceCapture'
+import LivenessCapture, { LivenessCaptureResult } from '../components/LivenessCapture'
 import { faceApi } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { format } from 'date-fns'
@@ -33,7 +33,7 @@ export default function FaceEnrollPage() {
 
   const [status, setStatus]       = useState<FaceStatus | null>(null)
   const [mode, setMode]           = useState<Mode>('view')
-  const [captured, setCaptured]   = useState<FaceCaptureResult | null>(null)
+  const [captured, setCaptured]   = useState<LivenessCaptureResult | null>(null)
   const [loading, setLoading]     = useState(false)
   const [checking, setChecking]   = useState(true)
 
@@ -193,12 +193,11 @@ export default function FaceEnrollPage() {
             </ul>
           </div>
 
-          <FaceCapture
+          <LivenessCapture
             captured={captured}
             onCapture={setCaptured}
             onClear={() => setCaptured(null)}
             label="Capture Face for Enrollment"
-            required
           />
 
           <div className="flex gap-3">
@@ -230,12 +229,11 @@ export default function FaceEnrollPage() {
             </div>
           </div>
 
-          <FaceCapture
+          <LivenessCapture
             captured={captured}
             onCapture={setCaptured}
             onClear={() => setCaptured(null)}
             label="Capture Face to Verify Identity"
-            required
           />
 
           <div className="flex gap-3">

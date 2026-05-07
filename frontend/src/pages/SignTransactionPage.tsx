@@ -16,6 +16,7 @@ import {
 import toast from 'react-hot-toast'
 import { txApi, keysApi, fraudApi, faceApi } from '../services/api'
 import FaceCapture, { FaceCaptureResult } from '../components/FaceCapture'
+import LivenessCapture, { LivenessCaptureResult } from '../components/LivenessCapture'
 import { useNavigate } from 'react-router-dom'
 
 function generateNonce() {
@@ -54,7 +55,7 @@ export default function SignTransactionPage() {
   const [keys, setKeys]             = useState<any[]>([])
 
   // ── Face state ──────────────────────────────────────────────────────────────
-  const [captured, setCaptured]     = useState<FaceCaptureResult | null>(null)
+  const [captured, setCaptured]     = useState<LivenessCaptureResult | null>(null)
   const [faceEnrolled, setFaceEnrolled] = useState<boolean | null>(null)
 
   // ── UI state ────────────────────────────────────────────────────────────────
@@ -348,12 +349,11 @@ export default function SignTransactionPage() {
               </p>
             </div>
 
-            <FaceCapture
+            <LivenessCapture
               captured={captured}
               onCapture={setCaptured}
               onClear={() => setCaptured(null)}
-              label="Capture Your Face"
-              required
+              label="Liveness Verification (Anti-Spoofing)"
             />
 
             <div className="flex gap-3">
