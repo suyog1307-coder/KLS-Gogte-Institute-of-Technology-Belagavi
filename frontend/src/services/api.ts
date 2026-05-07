@@ -44,6 +44,12 @@ export const authApi = {
     })
   },
 
+  // Google OAuth — send Google credential token to backend
+  googleLogin: (credential: string) =>
+    api.post('/auth/google', { credential }),
+
+  me: () => api.get('/auth/me'),
+
   loginWithFace: (username: string, password: string, faceBlob: Blob) => {
     const form = new FormData()
     form.append('username', username)
@@ -128,7 +134,16 @@ export const faceApi = {
   },
 
   status: () => api.get('/face/status'),
-  remove: () => api.delete('/face/'),
+
+  /** Delete face — REQUIRES live face verification (sends face image) */
+  remove: (faceBlob: Blob) => {
+    const form = new FormData()
+    form.append('face_image', faceBlob, 'face.jpg')
+    return api.delete('/face/', {
+      data: form,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 }
 
 // ── Audit ─────────────────────────────────────────────────────────────────────

@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Replay attack window in seconds (5 minutes)
     REPLAY_WINDOW_SECONDS: int = 300
 
+    # ── Google OAuth ──────────────────────────────────────────────────────────
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+
     # ── Face Verification ─────────────────────────────────────────────────────
     FACE_MODEL: str = "Facenet"                 # DeepFace model
     FACE_DISTANCE_THRESHOLD: float = 0.6        # cosine distance threshold

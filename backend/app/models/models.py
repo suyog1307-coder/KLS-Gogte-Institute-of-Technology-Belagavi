@@ -25,9 +25,15 @@ class User(Base):
     id              = Column(String(36), primary_key=True, default=_uuid)
     username        = Column(String(64),  unique=True, nullable=False, index=True)
     email           = Column(String(128), unique=True, nullable=False)
-    hashed_password = Column(String(256), nullable=False)
+    hashed_password = Column(String(256), nullable=True)   # nullable for Google-only users
     is_active       = Column(Boolean, default=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
+
+    # ── Google OAuth fields ───────────────────────────────────────────────────
+    google_id       = Column(String(128), unique=True, nullable=True, index=True)
+    profile_image   = Column(String(512), nullable=True)
+    auth_provider   = Column(String(16), default="local")  # "local" | "google"
+    face_registered = Column(Boolean, default=False)        # True after first face enroll
 
     keys = relationship("KeyPair", back_populates="user", cascade="all, delete-orphan")
     transactions_sent = relationship(

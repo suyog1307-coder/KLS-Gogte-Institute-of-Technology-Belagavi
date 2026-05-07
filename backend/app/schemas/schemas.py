@@ -28,10 +28,11 @@ class UserLogin(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user_id: str
-    username: str
+    access_token:    str
+    token_type:      str = "bearer"
+    user_id:         str
+    username:        str
+    face_registered: bool = False   # True = face enrolled, False = must enroll
 
 
 class UserOut(BaseModel):
