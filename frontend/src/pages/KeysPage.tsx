@@ -113,11 +113,11 @@ export default function KeysPage() {
     setGenerating(true)
     try {
       const { data } = await keysApi.generate()
-      // ── FIX: set newKey FIRST, then refresh list in background ──
+      // Auto-show private key immediately on generation
       setNewKey(data)
-      setShowPrivate(false)
-      toast.success('Key pair generated! You have 3 minutes to sign a transaction.')
-      // Refresh list without clearing newKey
+      setShowPrivate(true)   // ← show private key automatically
+      toast.success('Key pair generated! Save your private key — shown only once.')
+      // Refresh list in background without clearing newKey
       keysApi.list().then(({ data: list }) => setKeys(list)).catch(() => {})
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Key generation failed')
@@ -170,14 +170,17 @@ export default function KeysPage() {
       {/* ── New key panel ── */}
       {newKey && (
         <div className="card border-yellow-700 bg-yellow-900/10">
-          <div className="flex items-start justify-between mb-4">
+          {/* Header row */}
+          <div className="flex items-start justify-between mb-5">
             <div className="flex items-start gap-3">
               <AlertTriangle className="text-yellow-400 mt-0.5 shrink-0" size={20} />
               <div>
-                <h3 className="font-semibold text-yellow-300">Save Your Private Key Now</h3>
+                <h3 className="font-semibold text-yellow-300 text-base">
+                  🔑 New Key Pair Generated
+                </h3>
                 <p className="text-xs text-yellow-400/80 mt-1">
-                  This is the <strong>ONLY time</strong> your private key is shown.
-                  It is never stored on the server.
+                  Copy and save your <strong>Private Key</strong> now —
+                  it will <strong>never be shown again</strong> after you leave this page.
                 </p>
               </div>
             </div>
@@ -186,25 +189,33 @@ export default function KeysPage() {
 
           <div className="space-y-4">
 
-            {/* Key ID */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="label">Key ID</span>
+            {/* ── Key ID ── */}
+            <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                  Key ID
+                </span>
                 <CopyBtn text={newKey.key_id} label="Key ID" />
               </div>
-              <code className="block bg-gray-900 border border-gray-700 rounded-lg p-3
-                               text-sm text-blue-300 font-mono break-all select-all">
+              <code className="text-sm text-blue-300 font-mono break-all select-all leading-relaxed">
                 {newKey.key_id}
               </code>
             </div>
 
-            {/* Private key */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="label">Private Key (PEM)</span>
-                <div className="flex gap-3">
-                  <button onClick={() => setShowPrivate(!showPrivate)}
-                    className="text-xs text-gray-400 hover:text-white flex items-center gap-1">
+            {/* ── Private Key — always visible ── */}
+            <div className="bg-gray-900 border border-red-800/60 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-red-400 uppercase tracking-wider">
+                    Private Key (PEM)
+                  </span>
+                  <span className="badge-red text-xs">Save this now!</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowPrivate(!showPrivate)}
+                    className="text-xs text-gray-400 hover:text-white flex items-center gap-1 transition-colors"
+                  >
                     {showPrivate ? <EyeOff size={12} /> : <Eye size={12} />}
                     {showPrivate ? 'Hide' : 'Show'}
                   </button>
@@ -214,32 +225,49 @@ export default function KeysPage() {
                 </div>
               </div>
               {showPrivate && newKey.private_key_pem ? (
-                <pre className="bg-gray-900 border border-gray-700 rounded-lg p-3
-                                text-xs text-green-400 font-mono overflow-x-auto
-                                whitespace-pre-wrap break-all select-all max-h-48">
+                <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap
+                                break-all select-all leading-relaxed mt-1
+                                max-h-56 overflow-y-auto">
                   {newKey.private_key_pem}
                 </pre>
               ) : (
-                <div className="bg-gray-900 border border-gray-700 rounded-lg p-3
-                                text-xs text-gray-500 text-center cursor-pointer
-                                hover:border-gray-600 transition-colors"
-                  onClick={() => setShowPrivate(true)}>
-                  🔒 Click "Show" to reveal private key
-                </div>
+                <button
+                  onClick={() => setShowPrivate(true)}
+                  className="w-full text-center text-xs text-gray-500 hover:text-green-400
+                             transition-colors py-3 border border-dashed border-gray-700
+                             rounded-lg mt-1"
+                >
+                  👁 Click to show private key
+                </button>
               )}
             </div>
 
-            {/* Public key */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="label">Public Key (PEM)</span>
+            {/* ── Public Key ── */}
+            <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                  Public Key (PEM)
+                </span>
                 <CopyBtn text={newKey.public_key_pem} label="Public key" />
               </div>
-              <pre className="bg-gray-900 border border-gray-700 rounded-lg p-3
-                              text-xs text-blue-300 font-mono overflow-x-auto
-                              whitespace-pre-wrap break-all select-all max-h-36">
+              <pre className="text-xs text-blue-300 font-mono whitespace-pre-wrap
+                              break-all select-all leading-relaxed
+                              max-h-36 overflow-y-auto">
                 {newKey.public_key_pem}
               </pre>
+            </div>
+
+            {/* Algorithm + expiry info */}
+            <div className="flex items-center gap-4 text-xs text-gray-500 px-1">
+              <span>Algorithm: <strong className="text-gray-300">{newKey.algorithm}</strong></span>
+              <span>Created: <strong className="text-gray-300">
+                {format(new Date(newKey.created_at), 'HH:mm:ss')}
+              </strong></span>
+              {newKey.expires_at && (
+                <span>Expires: <strong className="text-yellow-400">
+                  {format(new Date(newKey.expires_at), 'HH:mm:ss')}
+                </strong></span>
+              )}
             </div>
 
           </div>
