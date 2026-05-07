@@ -21,6 +21,7 @@ interface AuthContextType extends AuthState {
   setFaceRegistered: (val: boolean) => void
   logout: () => void
   isAuthenticated: boolean
+  token: string | null   // expose directly for guards
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)

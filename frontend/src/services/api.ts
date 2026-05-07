@@ -12,18 +12,35 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Auto-logout on 401 (but NOT for face verification failures — those return 401 too)
+// Auto-logout on 401 — only for non-face, non-sign routes
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    const url: string = err.config?.url || ''
-    const is401 = err.response?.status === 401
-    // Only auto-logout on auth endpoints, not face verification failures
-    const isFaceOrSign = url.includes('/transactions/sign') || url.includes('/face/')
-    if (is401 && !isFaceOrSign) {
+    const url: string  = err.config?.url || ''
+    const status       = err.response?.status
+    const detail: string = err.response?.data?.detail || ''
+
+    // Never auto-logout on these routes — they have their own 401 handling
+    const skipLogout =
+      url.includes('/transactions/sign') ||
+      url.includes('/face/')             ||
+      url.includes('/liveness/')         ||
+      url.includes('/auth/google')       ||
+      url.includes('/auth/login')
+
+    // Only auto-logout when token is genuinely invalid/expired
+    // NOT when face verification fails (also returns 401)
+    const isTokenError =
+      status === 401 &&
+      (detail.includes('Invalid or expired token') ||
+       detail.includes('Not authenticated') ||
+       detail.includes('Could not validate'))
+
+    if (isTokenError && !skipLogout) {
       localStorage.clear()
       window.location.href = '/login'
     }
+
     return Promise.reject(err)
   }
 )

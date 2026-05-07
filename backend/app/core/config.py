@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION_USE_32_BYTES_MIN"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480   # 8 hours
 
     # Key encryption passphrase (AES-256-GCM encrypts private keys at rest)
     KEY_ENCRYPTION_SECRET: str = "CHANGE_ME_KEY_ENCRYPTION_SECRET_32B"

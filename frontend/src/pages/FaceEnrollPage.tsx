@@ -26,7 +26,7 @@ interface FaceStatus {
 type Mode = 'view' | 'enroll' | 'delete-verify'
 
 export default function FaceEnrollPage() {
-  const { faceRegistered, setFaceRegistered } = useAuth()
+  const { faceRegistered, setFaceRegistered, token } = useAuth()
   const [searchParams]  = useSearchParams()
   const isForced        = searchParams.get('required') === 'true'
   const navigate        = useNavigate()
@@ -37,16 +37,17 @@ export default function FaceEnrollPage() {
   const [loading, setLoading]     = useState(false)
   const [checking, setChecking]   = useState(true)
 
+  // Guard: if no token, redirect to login immediately
   useEffect(() => {
+    if (!token) { navigate('/login', { replace: true }); return }
     faceApi.status()
       .then(({ data }) => {
         setStatus(data)
-        // If forced (first login) and not enrolled, go straight to enroll mode
         if (isForced && !data.enrolled) setMode('enroll')
       })
       .catch(() => setStatus({ enrolled: false }))
       .finally(() => setChecking(false))
-  }, [isForced])
+  }, [isForced, token, navigate])
 
   // ── Enroll ──────────────────────────────────────────────────────────────────
   const handleEnroll = async () => {
@@ -62,7 +63,14 @@ export default function FaceEnrollPage() {
       setMode('view')
       if (isForced) navigate('/transactions')
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Enrollment failed')
+      const detail = err.response?.data?.detail || 'Enrollment failed'
+      const status = err.response?.status
+      if (status === 401) {
+        toast.error('Session expired. Please log in again.', { duration: 5000 })
+        navigate('/login', { replace: true })
+      } else {
+        toast.error(detail)
+      }
     } finally {
       setLoading(false)
     }
