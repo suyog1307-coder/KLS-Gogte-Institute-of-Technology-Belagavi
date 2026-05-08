@@ -1,19 +1,19 @@
 /**
  * LivenessCapture.tsx
  * ===================
- * Auto-captures within 10 seconds.
+ * Webcam face capture with liveness detection.
  *
- * Flow:
- *  1. Camera starts automatically when component mounts
- *  2. 10-second countdown ring visible immediately
- *  3. Auto-captures as soon as liveness is confirmed (blink/pose)
- *  4. If 10s runs out without liveness → captures anyway (basic mode)
- *  5. Manual "Capture Now" button available at any time after face detected
+ * Behaviour:
+ *  - Camera starts automatically when component mounts
+ *  - User must MANUALLY click "Capture" — NO auto-capture
+ *  - Button is disabled until face is detected AND challenge is completed
+ *  - Challenge: blink once (EAR < 0.21) OR look at camera for 2 seconds
+ *  - Shows clear status: "Position face" → "Blink once" → "Ready — click Capture"
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Camera, Eye, AlertTriangle, CheckCircle,
-  RefreshCw, ShieldCheck, ShieldX, Activity, Zap,
+  RefreshCw, ShieldCheck, ShieldX, Activity,
 } from 'lucide-react'
 
 export interface LivenessCaptureResult {
@@ -25,50 +25,6 @@ export interface LivenessCaptureResult {
   headYaw:       number
 }
 
-interface Challenge { id: string; instruction: string; icon: string }
-
-const CHALLENGES: Challenge[] = [
-  { id: 'blink',      instruction: 'Blink your eyes',              icon: '👁' },
-  { id: 'turn_left',  instruction: 'Turn head slightly left',      icon: '⬅' },
-  { id: 'turn_right', instruction: 'Turn head slightly right',     icon: '➡' },
-  { id: 'forward',    instruction: 'Look directly at the camera',  icon: '🎯' },
-]
-
-const TOTAL_SECONDS = 10   // hard deadline
-
-// ── EAR ──────────────────────────────────────────────────────────────────────
-function calcEAR(eye: { x: number; y: number }[]): number {
-  if (eye.length < 6) return 0.3
-  const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-    Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2)
-  const A = d(eye[1], eye[5]), B = d(eye[2], eye[4]), C = d(eye[0], eye[3])
-  return C < 0.001 ? 0.3 : (A + B) / (2 * C)
-}
-
-const LEFT_EYE  = [33, 160, 158, 133, 153, 144]
-const RIGHT_EYE = [362, 385, 387, 263, 373, 380]
-
-// ── SVG countdown ring ────────────────────────────────────────────────────────
-function CountdownRing({ seconds, total }: { seconds: number; total: number }) {
-  const r    = 22
-  const circ = 2 * Math.PI * r
-  const pct  = seconds / total
-  const dash = pct * circ
-  const color = seconds > 5 ? '#22c55e' : seconds > 3 ? '#f59e0b' : '#ef4444'
-
-  return (
-    <div className="relative flex items-center justify-center w-14 h-14">
-      <svg width="56" height="56" viewBox="0 0 56 56" className="-rotate-90">
-        <circle cx="28" cy="28" r={r} fill="none" stroke="#374151" strokeWidth="4" />
-        <circle cx="28" cy="28" r={r} fill="none" stroke={color} strokeWidth="4"
-          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
-          style={{ transition: 'stroke-dasharray 1s linear, stroke 0.5s' }} />
-      </svg>
-      <span className="absolute text-lg font-bold" style={{ color }}>{seconds}</span>
-    </div>
-  )
-}
-
 interface Props {
   onCapture: (result: LivenessCaptureResult) => void
   onClear?:  () => void
@@ -76,91 +32,78 @@ interface Props {
   label?:    string
 }
 
+// MediaPipe landmark indices for eyes
+const LEFT_EYE  = [33, 160, 158, 133, 153, 144]
+const RIGHT_EYE = [362, 385, 387, 263, 373, 380]
+
+function calcEAR(pts: { x: number; y: number }[]): number {
+  if (pts.length < 6) return 0.3
+  const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2)
+  const A = d(pts[1], pts[5]), B = d(pts[2], pts[4]), C = d(pts[0], pts[3])
+  return C < 0.001 ? 0.3 : (A + B) / (2 * C)
+}
+
 export default function LivenessCapture({ onCapture, onClear, captured, label }: Props) {
   const videoRef  = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const framesRef = useRef<string[]>([])
   const mpRef     = useRef<any>(null)
   const animRef   = useRef<number>(0)
-  const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null)
-  const capturedRef = useRef(false)   // prevent double-capture
+  const framesRef = useRef<string[]>([])
   const blinkRef  = useRef(false)
 
-  const [camError,      setCamError]      = useState('')
-  const [started,       setStarted]       = useState(false)
-  const [faceDetected,  setFaceDetected]  = useState(false)
-  const [livenessOk,    setLivenessOk]    = useState(false)
-  const [blinkCount,    setBlinkCount]    = useState(0)
-  const [earValue,      setEarValue]      = useState(0.3)
-  const [headYaw,       setHeadYaw]       = useState(0)
-  const [spoofScore,    setSpoofScore]    = useState(0)
-  const [secondsLeft,   setSecondsLeft]   = useState(TOTAL_SECONDS)
-  const [autoCapturing, setAutoCapturing] = useState(false)
-  const [challenge]     = useState<Challenge>(
-    () => CHALLENGES[Math.floor(Math.random() * CHALLENGES.length)]
-  )
+  // How long the face has been in frame (for "look at camera" challenge)
+  const faceTimeRef = useRef(0)
+  const lastFrameRef = useRef(0)
 
-  // ── Capture image ─────────────────────────────────────────────────────────
-  const doCapture = useCallback(() => {
-    if (capturedRef.current) return
-    capturedRef.current = true
-    setAutoCapturing(true)
+  const [camError,     setCamError]     = useState('')
+  const [started,      setStarted]      = useState(false)
+  const [faceDetected, setFaceDetected] = useState(false)
+  const [blinkDone,    setBlinkDone]    = useState(false)
+  const [earValue,     setEarValue]     = useState(0.3)
+  const [headYaw,      setHeadYaw]      = useState(0)
+  const [blinkCount,   setBlinkCount]   = useState(0)
+  const [faceSeconds,  setFaceSeconds]  = useState(0)  // seconds face has been in frame
+  const [capturing,    setCapturing]    = useState(false)
 
-    const canvas = canvasRef.current
-    if (!canvas) return
+  // Challenge is complete when: blinked once OR face in frame for 3 seconds
+  const FACE_HOLD_SECONDS = 3
+  const challengeDone = blinkDone || faceSeconds >= FACE_HOLD_SECONDS
+  const readyToCapture = faceDetected && challengeDone
 
-    canvas.toBlob(blob => {
-      if (!blob) return
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
-      onCapture({
-        blob,
-        dataUrl,
-        frames:        [...framesRef.current],
-        challengeId:   challenge.id,
-        blinkDetected: blinkCount > 0,
-        headYaw,
-      })
-      // Stop camera
-      if (timerRef.current) clearInterval(timerRef.current)
-      cancelAnimationFrame(animRef.current)
-      streamRef.current?.getTracks().forEach(t => t.stop())
-      streamRef.current = null
-    }, 'image/jpeg', 0.92)
-  }, [challenge.id, blinkCount, headYaw, onCapture])
-
-  // ── Stop camera ───────────────────────────────────────────────────────────
+  // ── Stop camera ─────────────────────────────────────────────────────────────
   const stopCamera = useCallback(() => {
-    if (timerRef.current) clearInterval(timerRef.current)
     cancelAnimationFrame(animRef.current)
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
     if (videoRef.current) videoRef.current.srcObject = null
     setStarted(false)
     setFaceDetected(false)
-    setLivenessOk(false)
-    setSecondsLeft(TOTAL_SECONDS)
-    capturedRef.current = false
-    setAutoCapturing(false)
+    setBlinkDone(false)
+    setBlinkCount(0)
+    setFaceSeconds(0)
+    faceTimeRef.current = 0
+    blinkRef.current = false
   }, [])
 
   useEffect(() => () => stopCamera(), [stopCamera])
 
-  // ── Auto-start on mount ───────────────────────────────────────────────────
+  // Auto-start on mount (only if not already captured)
   useEffect(() => {
     if (!captured) startCamera()
-  }, [])   // eslint-disable-line
+  }, []) // eslint-disable-line
 
-  // ── Start camera ─────────────────────────────────────────────────────────
+  // ── Start camera ─────────────────────────────────────────────────────────────
   const startCamera = async () => {
     setCamError('')
-    capturedRef.current = false
-    framesRef.current   = []
-    setSecondsLeft(TOTAL_SECONDS)
+    setBlinkDone(false)
     setBlinkCount(0)
-    setLivenessOk(false)
+    setFaceSeconds(0)
     setFaceDetected(false)
-    setAutoCapturing(false)
+    faceTimeRef.current = 0
+    blinkRef.current = false
+    framesRef.current = []
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -173,33 +116,17 @@ export default function LivenessCapture({ onCapture, onClear, captured, label }:
         await videoRef.current.play()
       }
       setStarted(true)
-      startCountdownTimer()
       initMediaPipe()
     } catch (err: any) {
       setCamError(
-        err.name === 'NotAllowedError' ? 'Camera permission denied. Please allow camera access.' :
+        err.name === 'NotAllowedError' ? 'Camera permission denied. Please allow camera access in your browser.' :
         err.name === 'NotFoundError'   ? 'No camera found on this device.' :
         `Camera error: ${err.message}`
       )
     }
   }
 
-  // ── 10-second countdown timer ─────────────────────────────────────────────
-  const startCountdownTimer = () => {
-    if (timerRef.current) clearInterval(timerRef.current)
-    let s = TOTAL_SECONDS
-    timerRef.current = setInterval(() => {
-      s -= 1
-      setSecondsLeft(s)
-      if (s <= 0) {
-        clearInterval(timerRef.current!)
-        // Time's up — capture whatever we have
-        doCapture()
-      }
-    }, 1000)
-  }
-
-  // ── MediaPipe ─────────────────────────────────────────────────────────────
+  // ── MediaPipe ────────────────────────────────────────────────────────────────
   const initMediaPipe = async () => {
     try {
       // @ts-ignore
@@ -232,11 +159,11 @@ export default function LivenessCapture({ onCapture, onClear, captured, label }:
     animRef.current = requestAnimationFrame(loop)
   }
 
-  // ── MediaPipe results ─────────────────────────────────────────────────────
+  // ── MediaPipe results ─────────────────────────────────────────────────────────
   const onResults = (results: any) => {
     const canvas = canvasRef.current
     const video  = videoRef.current
-    if (!canvas || !video || capturedRef.current) return
+    if (!canvas || !video) return
 
     const ctx = canvas.getContext('2d')!
     canvas.width  = video.videoWidth  || 640
@@ -252,35 +179,53 @@ export default function LivenessCapture({ onCapture, onClear, captured, label }:
 
     if (!results.multiFaceLandmarks?.length) {
       setFaceDetected(false)
+      faceTimeRef.current = 0
+      setFaceSeconds(0)
       return
     }
 
     setFaceDetected(true)
+
+    // Track how long face has been in frame
+    const now = Date.now()
+    if (lastFrameRef.current > 0) {
+      const delta = (now - lastFrameRef.current) / 1000
+      faceTimeRef.current = Math.min(faceTimeRef.current + delta, FACE_HOLD_SECONDS)
+      setFaceSeconds(Math.floor(faceTimeRef.current))
+    }
+    lastFrameRef.current = now
+
     const lm = results.multiFaceLandmarks[0]
 
     // Face mesh dots
-    ctx.fillStyle = 'rgba(0,200,255,0.35)'
+    ctx.fillStyle = 'rgba(0,200,255,0.3)'
     lm.forEach((p: any) => {
       ctx.beginPath()
       ctx.arc(p.x * W, p.y * H, 1.2, 0, 2 * Math.PI)
       ctx.fill()
     })
 
-    // EAR
+    // EAR blink detection
     const lPts = LEFT_EYE.map(i  => ({ x: lm[i].x * W, y: lm[i].y * H }))
     const rPts = RIGHT_EYE.map(i => ({ x: lm[i].x * W, y: lm[i].y * H }))
     const ear  = (calcEAR(lPts) + calcEAR(rPts)) / 2
     setEarValue(ear)
 
+    // Blink: EAR drops below 0.21 then rises above 0.25
     if (ear < 0.21 && !blinkRef.current) {
       blinkRef.current = true
-      setBlinkCount(c => {
-        const next = c + 1
-        return next
-      })
+      setBlinkCount(c => c + 1)
+      setBlinkDone(true)
     } else if (ear > 0.25) {
       blinkRef.current = false
     }
+
+    // Head yaw
+    const nose = lm[1], lE = lm[33], rE = lm[263]
+    const midX = (lE.x + rE.x) / 2
+    const eyeD = Math.abs(rE.x - lE.x)
+    const yaw  = eyeD > 0.01 ? ((nose.x - midX) / eyeD) * 45 : 0
+    setHeadYaw(yaw)
 
     // Eye outlines
     ctx.strokeStyle = ear < 0.21 ? '#ff4444' : '#00ff88'
@@ -292,34 +237,20 @@ export default function LivenessCapture({ onCapture, onClear, captured, label }:
       ctx.stroke()
     })
 
-    // Head yaw
-    const nose = lm[1], lE = lm[33], rE = lm[263]
-    const midX = (lE.x + rE.x) / 2
-    const eyeD = Math.abs(rE.x - lE.x)
-    const yaw  = eyeD > 0.01 ? ((nose.x - midX) / eyeD) * 45 : 0
-    setHeadYaw(yaw)
-
-    // Spoof heuristic
-    const spoof = ear < 0.05 ? 0.8 : ear > 0.5 ? 0.6 : 0.1
-    setSpoofScore(spoof)
-
-    // Liveness check
-    let ok = false
-    if (challenge.id === 'blink')      ok = blinkCount >= 1
-    else if (challenge.id === 'turn_left')  ok = yaw < -15
-    else if (challenge.id === 'turn_right') ok = yaw > 15
-    else ok = Math.abs(yaw) < 20
-
-    setLivenessOk(ok)
-
-    // ── AUTO-CAPTURE when liveness confirmed ──────────────────────────────
-    if (ok && !capturedRef.current) {
-      // Small delay so user sees the green confirmation
-      setTimeout(() => doCapture(), 600)
-    }
+    // Face oval — color changes with readiness
+    const ovalColor = (blinkDone || faceTimeRef.current >= FACE_HOLD_SECONDS)
+      ? 'rgba(34,197,94,0.7)'
+      : 'rgba(251,191,36,0.5)'
+    ctx.strokeStyle = ovalColor
+    ctx.lineWidth = 2
+    ctx.setLineDash([6, 4])
+    ctx.beginPath()
+    ctx.ellipse(W / 2, H / 2, W * 0.22, H * 0.35, 0, 0, 2 * Math.PI)
+    ctx.stroke()
+    ctx.setLineDash([])
   }
 
-  // ── Buffer frames ─────────────────────────────────────────────────────────
+  // ── Buffer frames ─────────────────────────────────────────────────────────────
   const bufferFrame = () => {
     const v = videoRef.current
     if (!v || v.readyState < 2) return
@@ -332,33 +263,61 @@ export default function LivenessCapture({ onCapture, onClear, captured, label }:
     if (framesRef.current.length > 8) framesRef.current.shift()
   }
 
-  // ── Status ────────────────────────────────────────────────────────────────
-  const statusColor = livenessOk ? 'text-green-400' : faceDetected ? 'text-yellow-400' : 'text-gray-400'
-  const statusMsg   = autoCapturing
-    ? '✓ Capturing...'
-    : livenessOk
-    ? '✓ Liveness confirmed — capturing'
-    : faceDetected
-    ? `${challenge.icon} ${challenge.instruction}`
-    : '👤 Position your face in the oval'
+  // ── Manual capture (user clicks button) ──────────────────────────────────────
+  const doCapture = () => {
+    if (!readyToCapture || capturing) return
+    setCapturing(true)
 
-  // ── Captured preview ──────────────────────────────────────────────────────
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    canvas.toBlob(blob => {
+      if (!blob) { setCapturing(false); return }
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+      onCapture({
+        blob,
+        dataUrl,
+        frames:        [...framesRef.current],
+        challengeId:   blinkDone ? 'blink' : 'forward',
+        blinkDetected: blinkDone,
+        headYaw,
+      })
+      stopCamera()
+      setCapturing(false)
+    }, 'image/jpeg', 0.92)
+  }
+
+  // ── Status message ────────────────────────────────────────────────────────────
+  const getStatus = () => {
+    if (!faceDetected) return { msg: 'Position your face in the oval', color: 'text-gray-400', icon: '👤' }
+    if (blinkDone)     return { msg: 'Liveness confirmed — click Capture', color: 'text-green-400', icon: '✓' }
+    if (faceSeconds >= FACE_HOLD_SECONDS) return { msg: 'Ready — click Capture', color: 'text-green-400', icon: '✓' }
+    return {
+      msg: `Blink once to confirm liveness (or hold still ${FACE_HOLD_SECONDS - faceSeconds}s)`,
+      color: 'text-yellow-400',
+      icon: '👁',
+    }
+  }
+
+  const status = getStatus()
+
+  // ── Captured preview ──────────────────────────────────────────────────────────
   if (captured) {
     return (
       <div className="space-y-2">
         {label && <label className="label">{label}</label>}
-        <div className="relative rounded-xl overflow-hidden border border-green-700 bg-gray-900">
+        <div className="relative rounded-xl overflow-hidden border border-green-700/60 bg-gray-900">
           <img src={captured.dataUrl} alt="Captured face"
             className="w-full max-h-56 object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
           <div className="absolute top-3 left-3">
             <span className="badge-green text-xs flex items-center gap-1">
-              <CheckCircle size={11} /> Liveness verified
+              <CheckCircle size={11} /> Face captured
             </span>
           </div>
           <div className="absolute bottom-3 left-0 right-0 flex justify-center">
             <button type="button"
-              onClick={() => { onClear?.(); stopCamera(); startCamera() }}
+              onClick={() => { onClear?.(); stopCamera(); setTimeout(startCamera, 100) }}
               className="btn-secondary text-sm py-1.5 px-4 flex items-center gap-2">
               <RefreshCw size={14} /> Retake
             </button>
@@ -368,7 +327,7 @@ export default function LivenessCapture({ onCapture, onClear, captured, label }:
     )
   }
 
-  // ── Camera view ───────────────────────────────────────────────────────────
+  // ── Camera view ───────────────────────────────────────────────────────────────
   return (
     <div className="space-y-2">
       {label && (
@@ -377,9 +336,9 @@ export default function LivenessCapture({ onCapture, onClear, captured, label }:
         </label>
       )}
 
-      <div className="rounded-xl overflow-hidden border border-gray-700 bg-gray-900">
+      <div className="rounded-xl overflow-hidden border border-gray-700/60 bg-gray-900">
 
-        {/* ── Video area ── */}
+        {/* Video area */}
         <div className="relative aspect-video bg-gray-950 flex items-center justify-center">
           <video ref={videoRef} className="hidden" muted playsInline />
           <canvas ref={canvasRef}
@@ -390,60 +349,58 @@ export default function LivenessCapture({ onCapture, onClear, captured, label }:
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
               {camError ? (
                 <>
-                  <AlertTriangle size={36} className="text-red-400" />
-                  <p className="text-sm text-red-400 text-center px-6">{camError}</p>
+                  <AlertTriangle size={32} className="text-red-400" />
+                  <p className="text-sm text-red-400 text-center px-6 max-w-xs">{camError}</p>
                   <button onClick={startCamera} className="btn-primary text-sm">
                     Try Again
                   </button>
                 </>
               ) : (
                 <>
-                  <Camera size={36} className="animate-pulse text-blue-400" />
+                  <Camera size={32} className="animate-pulse text-blue-400" />
                   <p className="text-sm text-gray-400">Starting camera...</p>
                 </>
               )}
             </div>
           )}
 
-          {/* Face oval guide */}
-          {started && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className={`w-44 h-56 rounded-full border-2 border-dashed transition-colors duration-300 ${
-                livenessOk || autoCapturing
-                  ? 'border-green-400 shadow-[0_0_20px_rgba(34,197,94,0.4)]'
-                  : faceDetected
-                  ? 'border-yellow-400/70'
-                  : 'border-gray-600/50'
-              }`} />
-            </div>
-          )}
-
-          {/* Countdown ring — top right */}
-          {started && !autoCapturing && (
+          {/* Ready flash overlay */}
+          {readyToCapture && started && (
             <div className="absolute top-3 right-3">
-              <CountdownRing seconds={secondsLeft} total={TOTAL_SECONDS} />
-            </div>
-          )}
-
-          {/* Auto-capturing flash */}
-          {autoCapturing && (
-            <div className="absolute inset-0 bg-white/20 flex items-center justify-center">
-              <div className="bg-green-500 rounded-full p-4 animate-ping" />
+              <span className="badge-green text-xs animate-pulse">
+                ✓ Ready
+              </span>
             </div>
           )}
         </div>
 
-        {/* ── Status bar ── */}
+        {/* Status bar */}
         {started && (
-          <div className="px-3 py-2 bg-gray-900 border-t border-gray-800 space-y-2">
+          <div className="px-4 py-3 bg-gray-900 border-t border-gray-800 space-y-2">
 
-            {/* Instruction */}
-            <p className={`text-sm font-medium text-center ${statusColor}`}>
-              {statusMsg}
+            {/* Main instruction */}
+            <p className={`text-sm font-medium text-center ${status.color}`}>
+              {status.icon} {status.msg}
             </p>
 
-            {/* Stats */}
-            <div className="flex items-center justify-between text-xs text-gray-500 gap-2">
+            {/* Face hold progress bar */}
+            {faceDetected && !blinkDone && (
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Hold still</span>
+                  <span>{faceSeconds}/{FACE_HOLD_SECONDS}s</span>
+                </div>
+                <div className="w-full bg-gray-800 rounded-full h-1.5">
+                  <div
+                    className="h-1.5 rounded-full bg-yellow-500 transition-all duration-1000"
+                    style={{ width: `${(faceSeconds / FACE_HOLD_SECONDS) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Stats row */}
+            <div className="flex items-center justify-between text-xs text-gray-500">
               <span className="flex items-center gap-1">
                 <Eye size={11} className={earValue < 0.21 ? 'text-red-400' : 'text-green-400'} />
                 EAR {earValue.toFixed(2)}
@@ -453,55 +410,57 @@ export default function LivenessCapture({ onCapture, onClear, captured, label }:
                 Blinks: {blinkCount}
               </span>
               <span>Yaw: {headYaw.toFixed(0)}°</span>
-              <span className={`flex items-center gap-1 ${spoofScore > 0.5 ? 'text-red-400' : 'text-green-400'}`}>
-                {spoofScore > 0.5
-                  ? <><ShieldX size={11} /> Spoof?</>
-                  : <><ShieldCheck size={11} /> Live</>}
+              <span className={`flex items-center gap-1 ${faceDetected ? 'text-green-400' : 'text-gray-600'}`}>
+                {faceDetected
+                  ? <><ShieldCheck size={11} /> Live</>
+                  : <><ShieldX size={11} /> No face</>}
               </span>
-            </div>
-
-            {/* Progress bar */}
-            <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
-              <div className={`h-1.5 rounded-full transition-all duration-500 ${
-                livenessOk ? 'bg-green-500 w-full' : faceDetected ? 'bg-yellow-500 w-1/2' : 'bg-gray-600 w-1/12'
-              }`} />
             </div>
           </div>
         )}
 
-        {/* ── Controls ── */}
-        <div className="p-3 flex gap-2 justify-center bg-gray-900/80">
+        {/* Controls */}
+        <div className="p-3 flex gap-2 justify-center bg-gray-900/80 border-t border-gray-800">
           {!started && !camError && (
-            <div className="flex items-center gap-2 text-sm text-gray-400">
-              <Camera size={15} className="animate-pulse" /> Starting...
-            </div>
+            <p className="text-sm text-gray-500 flex items-center gap-2">
+              <Camera size={14} className="animate-pulse" /> Starting...
+            </p>
           )}
-          {started && !autoCapturing && (
+
+          {started && (
             <>
-              {/* Manual capture — available once face is detected */}
-              <button type="button" onClick={doCapture}
-                disabled={!faceDetected}
-                className="btn-primary flex items-center gap-2 text-sm disabled:opacity-40">
-                <Zap size={15} />
-                {faceDetected ? 'Capture Now' : 'Waiting for face...'}
+              {/* CAPTURE button — only enabled when ready */}
+              <button
+                type="button"
+                onClick={doCapture}
+                disabled={!readyToCapture || capturing}
+                className={`flex items-center gap-2 px-5 py-2 rounded-xl font-semibold
+                             text-sm transition-all duration-150 active:scale-95
+                             ${readyToCapture && !capturing
+                               ? 'bg-gradient-to-r from-green-600 to-emerald-500 text-white shadow-lg shadow-green-900/30 hover:from-green-500 hover:to-emerald-400'
+                               : 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700'
+                             }`}
+              >
+                {capturing ? (
+                  <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Capturing...</>
+                ) : readyToCapture ? (
+                  <><CheckCircle size={16} /> Capture Face</>
+                ) : (
+                  <><Camera size={16} /> {faceDetected ? 'Blink to unlock' : 'Waiting for face...'}</>
+                )}
               </button>
+
               <button type="button" onClick={stopCamera}
-                className="btn-secondary text-sm">
+                className="btn-secondary text-sm px-3">
                 Cancel
               </button>
             </>
           )}
-          {autoCapturing && (
-            <span className="text-sm text-green-400 flex items-center gap-2">
-              <CheckCircle size={15} /> Captured!
-            </span>
-          )}
         </div>
       </div>
 
-      <p className="text-xs text-gray-500 text-center">
-        Auto-captures in <strong className="text-white">{secondsLeft}s</strong> ·
-        Blink to confirm liveness · Anti-spoofing active
+      <p className="text-xs text-gray-600 text-center">
+        Blink once <strong className="text-gray-400">OR</strong> hold still for {FACE_HOLD_SECONDS}s to unlock capture
       </p>
     </div>
   )
